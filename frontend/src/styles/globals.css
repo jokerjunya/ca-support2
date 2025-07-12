@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Spotify風のグローバルスタイル */
+:root {
+  --spotify-black: #000000;
+  --spotify-dark: #121212;
+  --spotify-dark-gray: #181818;
+  --spotify-gray: #282828;
+  --spotify-light-gray: #b3b3b3;
+  --spotify-white: #ffffff;
+  --spotify-green: #1ed760;
+  --spotify-green-hover: #1fdf64;
+  --spotify-green-active: #1db954;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  font-family: 'Circular', ui-sans-serif, system-ui;
+  background-color: var(--spotify-black);
+  color: var(--spotify-white);
+}
+
+body {
+  background-color: var(--spotify-black);
+  color: var(--spotify-white);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  html {
+    color-scheme: dark;
+  }
+}
+
+/* カスタムスクロールバー */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--spotify-dark-gray);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--spotify-gray);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--spotify-light-gray);
+}
+
+/* Spotify風のボタンスタイル */
+.btn-spotify {
+  @apply bg-spotify-green text-spotify-black font-semibold py-2 px-4 rounded-full transition-colors duration-200 hover:bg-spotify-green-hover active:bg-spotify-green-active;
+}
+
+.btn-spotify-outline {
+  @apply border-2 border-spotify-green text-spotify-green font-semibold py-2 px-4 rounded-full transition-colors duration-200 hover:bg-spotify-green hover:text-spotify-black;
+}
+
+/* メール関連のスタイル */
+.email-unread {
+  @apply font-bold text-unread-blue;
+}
+
+.email-read {
+  @apply font-normal text-read-gray;
+}
+
+.email-important {
+  @apply border-l-4 border-important-red;
+}
+
+.email-draft {
+  @apply italic text-draft-yellow;
+} 
