@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Send, Sparkles } from 'lucide-react';
 import { Email } from '../types/email';
 
@@ -13,24 +13,69 @@ export default function ReplyComposer({ email, onBack }: ReplyComposerProps) {
   const [replyText, setReplyText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [replyType, setReplyType] = useState<'business' | 'casual' | 'polite'>('business');
+  const [showToneSelector, setShowToneSelector] = useState(false);
+  const toneSelectorRef = useRef<HTMLDivElement>(null);
+
+  // ドロップダウンの外側をクリックしたときに閉じる
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (toneSelectorRef.current && !toneSelectorRef.current.contains(event.target as Node)) {
+        setShowToneSelector(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const generateAIReply = async () => {
     setIsGenerating(true);
     try {
-      // モック AI 返信生成
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log(`🤖 AI返信生成開始 - 語調: ${replyType}`);
       
-      const mockReplies = [
-        'ありがとうございます。確認いたします。',
-        'お疲れ様です。内容を拝見し、対応いたします。',
-        'ご連絡いただきありがとうございます。詳細を確認して返信いたします。',
-        '承知いたしました。確認後、改めてご連絡いたします。'
-      ];
-      
-      const reply = mockReplies[Math.floor(Math.random() * mockReplies.length)];
-      setReplyText(reply);
+      const response = await fetch('/api/emails/generate-reply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          messageId: email.id,
+          replyType: replyType,
+          customInstructions: '返信は簡潔で要点を押さえた内容にしてください',
+          language: 'ja'
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`✅ AI返信生成完了 - 処理時間: ${data.processing_time}ms, 信頼度: ${data.confidence}`);
+        setReplyText(data.reply);
+      } else {
+        const errorData = await response.json();
+        console.error('AI返信生成エラー:', errorData);
+        
+        // フォールバック: エラー時は定型文を使用
+        const fallbackReplies = {
+          business: 'お疲れ様です。\n\nご連絡いただきありがとうございます。\n内容を確認させていただき、後日改めてご連絡いたします。\n\nよろしくお願いいたします。',
+          casual: 'お疲れ様！\n\nメールありがとうございます。\n確認して後で返信しますね。',
+          polite: 'いつもお世話になっております。\n\nご丁寧にご連絡いただき、誠にありがとうございます。\n内容を拝見し、改めてご連絡させていただきます。\n\n何卒よろしくお願い申し上げます。'
+        };
+        setReplyText(fallbackReplies[replyType]);
+      }
     } catch (error) {
       console.error('AI返信生成エラー:', error);
+      
+      // フォールバック: エラー時は定型文を使用
+      const fallbackReplies = {
+        business: 'お疲れ様です。\n\nご連絡いただきありがとうございます。\n内容を確認させていただき、後日改めてご連絡いたします。\n\nよろしくお願いいたします。',
+        casual: 'お疲れ様！\n\nメールありがとうございます。\n確認して後で返信しますね。',
+        polite: 'いつもお世話になっております。\n\nご丁寧にご連絡いただき、誠にありがとうございます。\n内容を拝見し、改めてご連絡させていただきます。\n\n何卒よろしくお願い申し上げます。'
+      };
+      setReplyText(fallbackReplies[replyType]);
     } finally {
       setIsGenerating(false);
     }
@@ -81,11 +126,51 @@ export default function ReplyComposer({ email, onBack }: ReplyComposerProps) {
             </button>
             <h2 className="text-lg font-semibold text-white">返信作成</h2>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-3">
+            {/* 語調選択 */}
+            <div className="relative" ref={toneSelectorRef}>
+              <button
+                onClick={() => setShowToneSelector(!showToneSelector)}
+                className="flex items-center space-x-2 px-3 py-2 bg-spotify-dark text-spotify-light-gray border border-spotify-gray rounded-lg hover:border-spotify-green transition-colors"
+              >
+                <span className="text-sm">
+                  {replyType === 'business' && '💼 ビジネス'}
+                  {replyType === 'casual' && '😊 カジュアル'}
+                  {replyType === 'polite' && '🙏 丁寧語'}
+                </span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              
+              {showToneSelector && (
+                <div className="absolute top-full left-0 mt-1 w-40 bg-spotify-dark-gray border border-spotify-gray rounded-lg shadow-lg z-10">
+                  <button
+                    onClick={() => { setReplyType('business'); setShowToneSelector(false); }}
+                    className={`w-full text-left px-3 py-2 text-sm rounded-t-lg transition-colors ${replyType === 'business' ? 'bg-spotify-green text-black' : 'text-spotify-light-gray hover:bg-spotify-gray'}`}
+                  >
+                    💼 ビジネス調
+                  </button>
+                  <button
+                    onClick={() => { setReplyType('casual'); setShowToneSelector(false); }}
+                    className={`w-full text-left px-3 py-2 text-sm transition-colors ${replyType === 'casual' ? 'bg-spotify-green text-black' : 'text-spotify-light-gray hover:bg-spotify-gray'}`}
+                  >
+                    😊 カジュアル調
+                  </button>
+                  <button
+                    onClick={() => { setReplyType('polite'); setShowToneSelector(false); }}
+                    className={`w-full text-left px-3 py-2 text-sm rounded-b-lg transition-colors ${replyType === 'polite' ? 'bg-spotify-green text-black' : 'text-spotify-light-gray hover:bg-spotify-gray'}`}
+                  >
+                    🙏 丁寧語調
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button
               onClick={generateAIReply}
               disabled={isGenerating}
-              className="flex items-center space-x-2 px-4 py-2 bg-spotify-green hover:bg-spotify-green-hover disabled:bg-spotify-green-hover text-white rounded-lg transition-colors"
+              className="flex items-center space-x-2 px-4 py-2 bg-spotify-green hover:bg-spotify-green-hover disabled:bg-spotify-green-hover text-black disabled:text-gray-600 rounded-lg transition-colors font-semibold"
             >
               <Sparkles className="w-4 h-4" />
               <span>{isGenerating ? 'AI生成中...' : 'AI返信生成'}</span>
