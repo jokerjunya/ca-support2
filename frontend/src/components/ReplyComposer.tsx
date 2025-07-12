@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, Sparkles } from 'lucide-react';
+import { ArrowLeft, Send, Sparkles, FileText } from 'lucide-react';
 import { Email } from '../types/email';
+import { ReplyTemplate } from '../types/template';
+import TemplateSelector from './TemplateSelector';
 
 interface ReplyComposerProps {
   email: Email;
@@ -15,6 +17,7 @@ export default function ReplyComposer({ email, onBack }: ReplyComposerProps) {
   const [isSending, setIsSending] = useState(false);
   const [replyType, setReplyType] = useState<'business' | 'casual' | 'polite'>('business');
   const [showToneSelector, setShowToneSelector] = useState(false);
+  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
   const toneSelectorRef = useRef<HTMLDivElement>(null);
 
   // ドロップダウンの外側をクリックしたときに閉じる
@@ -79,6 +82,11 @@ export default function ReplyComposer({ email, onBack }: ReplyComposerProps) {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleTemplateSelect = (template: ReplyTemplate) => {
+    setReplyText(template.content);
+    setShowTemplateSelector(false);
   };
 
   const sendReply = async () => {
@@ -168,6 +176,14 @@ export default function ReplyComposer({ email, onBack }: ReplyComposerProps) {
             </div>
 
             <button
+              onClick={() => setShowTemplateSelector(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors font-semibold"
+            >
+              <FileText className="w-4 h-4" />
+              <span>テンプレート</span>
+            </button>
+
+            <button
               onClick={generateAIReply}
               disabled={isGenerating}
               className="flex items-center space-x-2 px-4 py-2 bg-spotify-green hover:bg-spotify-green-hover disabled:bg-spotify-green-hover text-black disabled:text-gray-600 rounded-lg transition-colors font-semibold"
@@ -215,6 +231,15 @@ export default function ReplyComposer({ email, onBack }: ReplyComposerProps) {
           <p className="text-white text-sm">{email.snippet}</p>
         </div>
       </div>
+
+      {/* テンプレート選択モーダル */}
+      {showTemplateSelector && (
+        <TemplateSelector
+          currentTone={replyType}
+          onTemplateSelect={handleTemplateSelect}
+          onClose={() => setShowTemplateSelector(false)}
+        />
+      )}
     </div>
   );
 } 
