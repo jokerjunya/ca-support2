@@ -293,6 +293,383 @@ router.post('/generate-reply', requireAuth, async (req, res) => {
   }
 });
 
+// 🧵 新機能: スレッドコンテキストを考慮したAI返信生成
+router.post('/threads/:threadId/generate-reply', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const user = req.user as AuthUser;
+    const { replyType = 'business', customInstructions, language = 'ja' } = req.body;
+    
+    if (!threadId) {
+      return res.status(400).json({ error: 'スレッドIDが必要です' });
+    }
+
+    console.log(`🧵 スレッドコンテキスト返信生成開始 - ThreadID: ${threadId}, 語調: ${replyType}`);
+
+    // スレッド全体を取得して正規化
+    const gmailService = createGmailService(user);
+    const normalizedThreadResult = await gmailService.getNormalizedThread(threadId, {
+      convertHtmlToText: true,
+      sortMessages: true,
+      excludeEmptyMessages: true
+    });
+    
+    if (!normalizedThreadResult || normalizedThreadResult.normalizedThread.messages.length === 0) {
+      return res.status(404).json({ error: 'スレッドが見つかりません' });
+    }
+
+    const normalizedThread = normalizedThreadResult.normalizedThread;
+    console.log(`📧 スレッド正規化完了 - ${normalizedThread.messages.length}件のメッセージを処理`);
+
+    // 最新メッセージを取得（返信対象）
+    const latestMessage = normalizedThread.messages[normalizedThread.messages.length - 1];
+    
+    if (!latestMessage) {
+      return res.status(400).json({ error: 'スレッドに有効なメッセージがありません' });
+    }
+
+    // LLMで返信を生成（スレッドコンテキスト付き）
+    const llmService = createLLMService();
+    const generateReplyResponse = await llmService.generateThreadReply({
+      normalizedThread,
+      replyType,
+      customInstructions,
+      language
+    });
+
+    console.log(`✅ スレッドコンテキスト返信生成完了 - 処理時間: ${generateReplyResponse.processing_time}ms, 信頼度: ${generateReplyResponse.confidence}`);
+
+    return res.json({
+      reply: generateReplyResponse.reply,
+      tone: generateReplyResponse.tone,
+      confidence: generateReplyResponse.confidence,
+      processing_time: generateReplyResponse.processing_time,
+      source: generateReplyResponse.processing_time > 0 ? 'llm' : 'fallback',
+      thread_context: {
+        threadId,
+        messageCount: normalizedThread.messages.length,
+        processedMessages: normalizedThreadResult.processedMessageCount,
+        errors: normalizedThreadResult.errors
+      }
+    });
+
+  } catch (error) {
+    console.error('スレッドコンテキスト返信生成エラー:', error);
+    return res.status(500).json({ error: 'スレッドコンテキスト返信生成に失敗しました' });
+  }
+});
+
+// 🎯 新機能: 複数返信候補生成（Superhuman AI / Gmail Smart Reply 方式）
+router.post('/threads/:threadId/generate-multiple-replies', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const { 
+      replyTypes = ['business', 'casual', 'polite'], 
+      replyLengths = ['brief', 'medium', 'detailed'],
+      candidateCount = 3,
+      customInstructions, 
+      language = 'ja' 
+    } = req.body;
+    
+    if (!threadId) {
+      return res.status(400).json({ error: 'スレッドIDが必要です' });
+    }
+
+    console.log(`🎯 複数返信候補生成開始 - ThreadID: ${threadId}, 候補数: ${candidateCount}`);
+
+    // スレッド全体を取得して正規化
+    const gmailService = createGmailService(req.user as AuthUser);
+    const normalizedThreadResult = await gmailService.getNormalizedThread(threadId, {
+      convertHtmlToText: true,
+      sortMessages: true,
+      excludeEmptyMessages: true
+    });
+    
+    if (!normalizedThreadResult || normalizedThreadResult.normalizedThread.messages.length === 0) {
+      return res.status(404).json({ error: 'スレッドが見つかりません' });
+    }
+
+    const normalizedThread = normalizedThreadResult.normalizedThread;
+    console.log(`📧 スレッド正規化完了 - ${normalizedThread.messages.length}件のメッセージを処理`);
+
+    // LLMで複数返信候補を生成
+    const llmService = createLLMService();
+    const generateMultipleRepliesResponse = await llmService.generateMultipleReplies({
+      normalizedThread,
+      replyTypes,
+      replyLengths,
+      candidateCount,
+      customInstructions,
+      language
+    });
+
+    console.log(`✅ 複数返信候補生成完了 - 処理時間: ${generateMultipleRepliesResponse.processing_time}ms, 候補数: ${generateMultipleRepliesResponse.candidates.length}`);
+
+    return res.json({
+      candidates: generateMultipleRepliesResponse.candidates,
+      processing_time: generateMultipleRepliesResponse.processing_time,
+      source: generateMultipleRepliesResponse.source,
+      thread_context: {
+        threadId,
+        messageCount: normalizedThread.messages.length,
+        processedMessages: normalizedThreadResult.processedMessageCount,
+        errors: normalizedThreadResult.errors
+      }
+    });
+
+  } catch (error) {
+    console.error('複数返信候補生成エラー:', error);
+    return res.status(500).json({ error: '複数返信候補生成に失敗しました' });
+  }
+});
+
+// 会話要約生成
+router.post('/threads/:threadId/summarize', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const { maxSummaryLength, language } = req.body;
+    
+    console.log(`📝 会話要約生成開始 - ThreadID: ${threadId}, 長さ: ${maxSummaryLength || 'medium'}`);
+    
+    // threadIdの妥当性確認
+    if (!threadId || threadId.trim() === '') {
+      return res.status(400).json({ error: '無効なスレッドIDです' });
+    }
+
+    // スレッド全体を取得して正規化
+    const gmailService = createGmailService(req.user as AuthUser);
+    const normalizedThreadResult = await gmailService.getNormalizedThread(threadId);
+    
+    if (!normalizedThreadResult || !normalizedThreadResult.normalizedThread) {
+      console.warn(`⚠️ スレッドが見つかりません - ThreadID: ${threadId}`);
+      return res.status(404).json({ error: 'スレッドが見つかりません' });
+    }
+
+    const normalizedThread = normalizedThreadResult.normalizedThread;
+    console.log(`📧 スレッド正規化完了 - ${normalizedThread.messages.length}件のメッセージを処理`);
+
+    // 会話要約を生成
+    const summarizeRequest = {
+      normalizedThread,
+      maxSummaryLength: maxSummaryLength || 'medium',
+      language: language || 'ja'
+    };
+    
+    const llmService = createLLMService();
+    const response = await llmService.summarizeConversation(summarizeRequest);
+    
+    console.log(`✅ 会話要約生成完了 - 処理時間: ${response.processing_time}ms`);
+    
+    return res.json({
+      ...response,
+      thread_context: {
+        threadId,
+        messageCount: normalizedThread.messages.length,
+        processedMessages: normalizedThreadResult.processedMessageCount
+      }
+    });
+  } catch (error) {
+    console.error('会話要約生成エラー:', error);
+    return res.status(500).json({ error: '会話要約生成に失敗しました' });
+  }
+});
+
+// 要約を活用した返信生成
+router.post('/threads/:threadId/generate-reply-with-summary', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const { conversationSummary, replyType, customInstructions, language } = req.body;
+    
+    console.log(`🤖 要約付き返信生成開始 - ThreadID: ${threadId}, 語調: ${replyType}`);
+    
+    // スレッド全体を取得して正規化
+    const gmailService = createGmailService(req.user as AuthUser);
+    const normalizedThreadResult = await gmailService.getNormalizedThread(threadId);
+    
+    if (!normalizedThreadResult || !normalizedThreadResult.normalizedThread) {
+      return res.status(404).json({ error: 'スレッドが見つかりません' });
+    }
+
+    const normalizedThread = normalizedThreadResult.normalizedThread;
+    console.log(`📧 スレッド正規化完了 - ${normalizedThread.messages.length}件のメッセージを処理`);
+
+    // 要約を活用した返信を生成
+    const generateRequest = {
+      normalizedThread,
+      conversationSummary: conversationSummary || {
+        overview: '',
+        keyPoints: [],
+        decisions: [],
+        actionItems: [],
+        questions: [],
+        deadlines: [],
+        participants: []
+      },
+      replyType: replyType || 'business',
+      customInstructions,
+      language: language || 'ja'
+    };
+    
+    const llmService = createLLMService();
+    const response = await llmService.generateReplyWithSummary(generateRequest);
+    
+    console.log(`✅ 要約付き返信生成完了 - 処理時間: ${response.processing_time}ms`);
+    
+    return res.json({
+      ...response,
+      thread_context: {
+        threadId,
+        messageCount: normalizedThread.messages.length,
+        processedMessages: normalizedThreadResult.processedMessageCount
+      }
+    });
+  } catch (error) {
+    console.error('要約付き返信生成エラー:', error);
+    return res.status(500).json({ error: '要約付き返信生成に失敗しました' });
+  }
+});
+
+// クイック返信提案生成（Gmail Smart Reply方式）
+router.post('/threads/:threadId/smart-reply-suggestions', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const { suggestionCount, language } = req.body;
+    
+    console.log(`⚡ クイック返信提案生成開始 - ThreadID: ${threadId}, 提案数: ${suggestionCount || 3}`);
+    
+    // スレッド全体を取得して正規化
+    const gmailService = createGmailService(req.user as AuthUser);
+    const normalizedThreadResult = await gmailService.getNormalizedThread(threadId);
+    
+    if (!normalizedThreadResult || !normalizedThreadResult.normalizedThread) {
+      return res.status(404).json({ error: 'スレッドが見つかりません' });
+    }
+
+    const normalizedThread = normalizedThreadResult.normalizedThread;
+    console.log(`📧 スレッド正規化完了 - ${normalizedThread.messages.length}件のメッセージを処理`);
+
+    // クイック返信提案を生成
+    const suggestionsRequest = {
+      normalizedThread,
+      suggestionCount: suggestionCount || 3,
+      language: language || 'ja'
+    };
+    
+    const llmService = createLLMService();
+    const response = await llmService.generateSmartReplySuggestions(suggestionsRequest);
+    
+    console.log(`✅ クイック返信提案生成完了 - 処理時間: ${response.processing_time}ms`);
+    
+    return res.json({
+      ...response,
+      thread_context: {
+        threadId,
+        messageCount: normalizedThread.messages.length,
+        processedMessages: normalizedThreadResult.processedMessageCount
+      }
+    });
+  } catch (error) {
+    console.error('クイック返信提案生成エラー:', error);
+    return res.status(500).json({ error: 'クイック返信提案生成に失敗しました' });
+  }
+});
+
+// 文脈依存語調分析
+router.post('/threads/:threadId/analyze-tone', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const { language } = req.body;
+    
+    console.log(`🎭 文脈依存語調分析開始 - ThreadID: ${threadId}`);
+    
+    // スレッド全体を取得して正規化
+    const gmailService = createGmailService(req.user as AuthUser);
+    const normalizedThreadResult = await gmailService.getNormalizedThread(threadId);
+    
+    if (!normalizedThreadResult || !normalizedThreadResult.normalizedThread) {
+      return res.status(404).json({ error: 'スレッドが見つかりません' });
+    }
+
+    const normalizedThread = normalizedThreadResult.normalizedThread;
+    console.log(`📧 スレッド正規化完了 - ${normalizedThread.messages.length}件のメッセージを処理`);
+
+    // 文脈依存語調分析を実行
+    const analysisRequest = {
+      normalizedThread,
+      language: language || 'ja'
+    };
+    
+    const llmService = createLLMService();
+    const response = await llmService.analyzeContextAwareTone(analysisRequest);
+    
+    console.log(`✅ 文脈依存語調分析完了 - 処理時間: ${response.processing_time}ms`);
+    
+    return res.json({
+      ...response,
+      thread_context: {
+        threadId,
+        messageCount: normalizedThread.messages.length,
+        processedMessages: normalizedThreadResult.processedMessageCount
+      }
+    });
+  } catch (error) {
+    console.error('文脈依存語調分析エラー:', error);
+    return res.status(500).json({ error: '文脈依存語調分析に失敗しました' });
+  }
+});
+
+// 文脈依存語調に基づく返信生成
+router.post('/threads/:threadId/generate-context-aware-reply', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const { toneAnalysis, customInstructions, language } = req.body;
+    
+    console.log(`🎭 文脈依存語調返信生成開始 - ThreadID: ${threadId}`);
+    
+    // スレッド全体を取得して正規化
+    const gmailService = createGmailService(req.user as AuthUser);
+    const normalizedThreadResult = await gmailService.getNormalizedThread(threadId);
+    
+    if (!normalizedThreadResult || !normalizedThreadResult.normalizedThread) {
+      return res.status(404).json({ error: 'スレッドが見つかりません' });
+    }
+
+    const normalizedThread = normalizedThreadResult.normalizedThread;
+    console.log(`📧 スレッド正規化完了 - ${normalizedThread.messages.length}件のメッセージを処理`);
+
+    // 文脈依存語調に基づく返信を生成
+    const generateRequest = {
+      normalizedThread,
+      toneAnalysis: toneAnalysis || {
+        formality: 'neutral',
+        tone: 'business',
+        keyPhrases: [],
+        recommendedTone: 'business',
+        consistency: 0.7
+      },
+      customInstructions,
+      language: language || 'ja'
+    };
+    
+    const llmService = createLLMService();
+    const response = await llmService.generateContextAwareToneReply(generateRequest);
+    
+    console.log(`✅ 文脈依存語調返信生成完了 - 処理時間: ${response.processing_time}ms`);
+    
+    return res.json({
+      ...response,
+      thread_context: {
+        threadId,
+        messageCount: normalizedThread.messages.length,
+        processedMessages: normalizedThreadResult.processedMessageCount
+      }
+    });
+  } catch (error) {
+    console.error('文脈依存語調返信生成エラー:', error);
+    return res.status(500).json({ error: '文脈依存語調返信生成に失敗しました' });
+  }
+});
+
 // 🧵 新機能: スレッド一覧取得
 router.get('/threads', requireAuth, async (req, res) => {
   try {
@@ -496,6 +873,111 @@ router.get('/stats/summary', requireAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       error: '統計取得に失敗しました'
+    });
+  }
+});
+
+// ===========================================
+// 🔥 NEW: スレッド正規化エンドポイント
+// ===========================================
+
+/**
+ * LLM向けに正規化されたスレッドを取得
+ * GET /api/emails/threads/:threadId/normalized
+ */
+router.get('/threads/:threadId/normalized', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    
+    console.log(`🔧 正規化スレッド取得リクエスト - ThreadID: ${threadId}`);
+    
+    // クエリパラメータからオプションを取得
+    const options = {
+      convertHtmlToText: req.query.convertHtml !== 'false', // デフォルト: true
+      sortMessages: req.query.sortMessages !== 'false',     // デフォルト: true
+      excludeEmptyMessages: req.query.excludeEmpty !== 'false' // デフォルト: true
+    };
+    
+    console.log(`🔧 正規化オプション:`, options);
+    
+    const result = await gmailService.getNormalizedThread(threadId, options);
+    
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        error: 'スレッドが見つかりません'
+      });
+    }
+    
+    return res.json({
+      success: true,
+      data: result.normalizedThread,
+      meta: {
+        processedMessageCount: result.processedMessageCount,
+        errors: result.errors,
+        threadId: threadId,
+        options: options
+      }
+    });
+  } catch (error) {
+    console.error('正規化スレッド取得エラー:', error);
+    return res.status(500).json({
+      success: false,
+      error: '正規化スレッドの取得に失敗しました',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * LLM向けに正規化されたスレッドを取得（POST版・詳細オプション指定可能）
+ * POST /api/emails/threads/:threadId/normalized
+ */
+router.post('/threads/:threadId/normalized', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    
+    console.log(`🔧 正規化スレッド取得リクエスト（POST）- ThreadID: ${threadId}`);
+    
+    // リクエストボディからオプションを取得
+    const options = {
+      convertHtmlToText: req.body.convertHtmlToText !== false,
+      sortMessages: req.body.sortMessages !== false,
+      excludeEmptyMessages: req.body.excludeEmptyMessages !== false,
+      ...req.body.options // 追加オプション
+    };
+    
+    console.log(`🔧 正規化オプション（POST）:`, options);
+    
+    const result = await gmailService.getNormalizedThread(threadId, options);
+    
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        error: 'スレッドが見つかりません'
+      });
+    }
+    
+    return res.json({
+      success: true,
+      data: result.normalizedThread,
+      meta: {
+        processedMessageCount: result.processedMessageCount,
+        errors: result.errors,
+        threadId: threadId,
+        options: options
+      }
+    });
+  } catch (error) {
+    console.error('正規化スレッド取得エラー（POST）:', error);
+    return res.status(500).json({
+      success: false,
+      error: '正規化スレッドの取得に失敗しました',
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });

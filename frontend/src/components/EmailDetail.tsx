@@ -94,9 +94,9 @@ export default function EmailDetail({ email, onReply, onDelete, onArchive }: Ema
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-spotify-dark">
+    <div className="h-full flex flex-col bg-spotify-dark">
       {/* Header */}
-      <div className="border-b border-spotify-gray p-6">
+      <div className="border-b border-spotify-gray p-6 flex-shrink-0">
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
             <h1 className="text-2xl font-bold text-spotify-white mb-2">

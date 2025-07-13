@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import EmailList from '../../components/EmailList';
 import EmailDetail from '../../components/EmailDetail';
 import ReplyComposer from '../../components/ReplyComposer';
+import ThreadIntegratedReplyComposer from '../../components/ThreadIntegratedReplyComposer';
 import NewEmailComposer from '../../components/NewEmailComposer';
 import ThreadView from '../../components/ThreadView';
 import EmailSearchBar, { SearchFilters } from '../../components/EmailSearchBar';
@@ -147,6 +148,27 @@ export default function Dashboard() {
   };
 
   const handleReplyClick = () => {
+    // 選択されたメールに対応するスレッドを見つける
+    if (selectedEmail) {
+      const emailThread = threads.find(thread => 
+        thread.emails.some(email => email.id === selectedEmail.id)
+      );
+      
+      if (emailThread) {
+        setSelectedThread(emailThread);
+      } else {
+        // スレッドが見つからない場合、単一メールのスレッドを作成
+        const singleEmailThread: EmailThread = {
+          id: selectedEmail.threadId || selectedEmail.id,
+          subject: selectedEmail.subject,
+          participants: [selectedEmail.from],
+          emails: [selectedEmail],
+          messageCount: 1,
+          lastMessageDate: new Date(selectedEmail.date)
+        };
+        setSelectedThread(singleEmailThread);
+      }
+    }
     setIsReplyMode(true);
   };
 
@@ -264,7 +286,7 @@ export default function Dashboard() {
       </header>
 
       {/* メインコンテンツ */}
-      <div className="flex h-[calc(100vh-80px)]">
+      <div className="flex h-[calc(100vh-140px)]">
         {/* サイドバー - 統計情報 */}
         <div className="w-64 bg-spotify-dark-gray border-r border-spotify-gray p-4">
           <div className="space-y-4">
@@ -381,22 +403,24 @@ export default function Dashboard() {
           </div>
 
           {/* メール詳細 / 返信作成 / 新規メール作成 */}
-          <div className="flex-1">
+          <div className="flex-1 h-full overflow-hidden">
             {isNewEmailMode ? (
               <NewEmailComposer
                 onBack={handleBackToList}
                 loadDraftId={loadDraftId || undefined}
               />
-            ) : isReplyMode && selectedEmail ? (
-              <ReplyComposer
-                email={selectedEmail}
+            ) : isReplyMode && selectedThread ? (
+              <ThreadIntegratedReplyComposer
+                thread={selectedThread}
                 onBack={handleBackToEmail}
               />
             ) : selectedEmail ? (
-              <EmailDetail
-                email={selectedEmail}
-                onReply={handleReplyClick}
-              />
+              <div className="h-full">
+                <EmailDetail
+                  email={selectedEmail}
+                  onReply={handleReplyClick}
+                />
+              </div>
             ) : (
               <div className="h-full flex items-center justify-center bg-spotify-dark">
                 <div className="text-center">

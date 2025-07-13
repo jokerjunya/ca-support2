@@ -7,8 +7,11 @@ import {
   EmailSendRequest,
   EmailSendResponse,
   EmailThread,
-  EmailAttachment
+  EmailAttachment,
+  ThreadNormalizerOptions,
+  ThreadNormalizerResult
 } from '../types/gmail';
+import { normalizeGmailThread } from '../utils/threadNormalizer';
 
 // モックデータ（開発・テスト用）
 const mockEmails: ParsedEmail[] = [
@@ -569,6 +572,14 @@ export class GmailService {
     }
 
     try {
+      // threadIdの妥当性確認
+      if (!threadId || threadId.trim() === '') {
+        console.warn(`⚠️ 無効なスレッドID: "${threadId}"`);
+        return mockEmails.filter(email => email.threadId === threadId);
+      }
+
+      console.log(`🔍 Gmail API: スレッド取得開始 - ThreadID: ${threadId}`);
+      
       // Gmail APIでスレッドを取得
       const threadResponse = await this.gmail.users.threads.get({
         userId: 'me',
@@ -584,9 +595,19 @@ export class GmailService {
         }
       }
 
+      console.log(`✅ Gmail API: スレッド取得成功 - ${emails.length}件のメッセージ`);
       return emails.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    } catch (error) {
-      console.error('スレッドメール取得エラー:', error);
+    } catch (error: any) {
+      console.error(`❌ Gmail API: スレッドメール取得エラー - ThreadID: ${threadId}`, error);
+      
+      // 特定のエラーコードに対する詳細なログ
+      if (error.code === 400) {
+        console.warn(`⚠️ Gmail API: 無効なスレッドID - "${threadId}"`);
+      } else if (error.code === 404) {
+        console.warn(`⚠️ Gmail API: スレッドが見つかりません - "${threadId}"`);
+      }
+      
+      // エラー時はモックデータから検索
       return mockEmails.filter(email => email.threadId === threadId);
     }
   }
@@ -601,6 +622,55 @@ export class GmailService {
     }
 
     return this.createThreadFromEmails(emails);
+  }
+
+  /**
+   * LLM向けに正規化されたスレッドを取得
+   * Gmail APIから取得したスレッドを正規化し、LLMに渡しやすい形式に変換
+   * @param threadId スレッドID
+   * @param options 正規化オプション
+   * @returns 正規化されたスレッドデータとメタ情報
+   */
+  async getNormalizedThread(
+    threadId: string, 
+    options: ThreadNormalizerOptions = {}
+  ): Promise<ThreadNormalizerResult | null> {
+    console.log(`🔧 Gmail API: 正規化スレッド取得開始 - ThreadID: ${threadId}`);
+    
+    try {
+      // 通常のスレッドを取得
+      const thread = await this.getThreadById(threadId);
+      
+      if (!thread) {
+        console.log(`📧 Gmail API: スレッドが見つかりません - ThreadID: ${threadId}`);
+        return null;
+      }
+
+      console.log(`📧 Gmail API: スレッド取得成功 - ${thread.emails.length}件のメッセージ`);
+      
+      // スレッドを正規化
+      const result = normalizeGmailThread(thread, options);
+      
+      console.log(`✅ Gmail API: スレッド正規化完了 - ${result.processedMessageCount}件処理`);
+      
+      if (result.errors && result.errors.length > 0) {
+        console.warn(`⚠️ Gmail API: 正規化中にエラーが発生:`, result.errors);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error(`❌ Gmail API: 正規化スレッド取得エラー:`, error);
+      
+      // エラーが発生した場合でも基本的な結果を返す
+      return {
+        normalizedThread: {
+          threadId,
+          messages: []
+        },
+        processedMessageCount: 0,
+        errors: [`Failed to get normalized thread: ${error}`]
+      };
+    }
   }
 
   /**
@@ -625,7 +695,7 @@ export class GmailService {
       } catch (error) {
         console.error('📧 直接body取得エラー:', error);
       }
-    } 
+    }
     // partsから本文を抽出
     else if (gmailMessage.payload.parts) {
       console.log(`📧 partsから本文抽出開始`);
@@ -674,9 +744,9 @@ export class GmailService {
     return {
       id: gmailMessage.id,
       threadId: gmailMessage.threadId,
-      subject: getHeader('Subject'),
-      from: getHeader('From'),
-      to: getHeader('To'),
+      subject: this.decodeRFC2047(getHeader('Subject')),
+      from: this.decodeRFC2047(getHeader('From')),
+      to: this.decodeRFC2047(getHeader('To')),
       date: new Date(parseInt(gmailMessage.internalDate)),
       body,
       read: !gmailMessage.labelIds.includes('UNREAD'),
@@ -685,6 +755,44 @@ export class GmailService {
       snippet: gmailMessage.snippet,
       attachments: attachments.length > 0 ? attachments : []
     };
+  }
+
+  /**
+   * RFC 2047エンコーディングをデコード
+   * 例: =?UTF-8?B?44K544OX44O844OB44Oe44Oz?= -> スーパーマン
+   */
+  private decodeRFC2047(input: string): string {
+    if (!input) return '';
+    
+    try {
+      // RFC 2047エンコーディングパターン: =?charset?encoding?text?=
+      const rfc2047Pattern = /=\?([^?]+)\?([BQ])\?([^?]+)\?=/gi;
+      
+      return input.replace(rfc2047Pattern, (match, charset, encoding, text) => {
+        try {
+          if (encoding.toUpperCase() === 'B') {
+            // Base64デコード
+            const decoded = Buffer.from(text, 'base64').toString('utf-8');
+            console.log(`📧 RFC2047デコード成功 (Base64): ${match} -> ${decoded}`);
+            return decoded;
+          } else if (encoding.toUpperCase() === 'Q') {
+            // Quoted-printableデコード
+            const decoded = text
+              .replace(/_/g, ' ')
+              .replace(/=([A-F0-9]{2})/gi, (_: string, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+            console.log(`📧 RFC2047デコード成功 (Quoted-printable): ${match} -> ${decoded}`);
+            return decoded;
+          }
+          return match;
+        } catch (error) {
+          console.error(`📧 RFC2047デコードエラー: ${match}`, error);
+          return match;
+        }
+      });
+    } catch (error) {
+      console.error('📧 RFC2047デコード全体エラー:', error);
+      return input;
+    }
   }
 
   /**
