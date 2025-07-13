@@ -24,4 +24,20 @@ export interface EmailStats {
   unreadEmails: number;
   readEmails: number;
   todayEmails: number;
+}
+
+export interface EmailThread {
+  id: string;
+  subject: string;
+  emails: Email[];
+  lastMessageDate: Date;
+  messageCount: number;
+  participants: string[];
+}
+
+export interface ThreadViewProps {
+  threads: EmailThread[];
+  selectedThread: EmailThread | null;
+  onThreadSelect: (thread: EmailThread) => void;
+  onEmailSelect: (email: Email) => void;
 } 

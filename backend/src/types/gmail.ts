@@ -52,4 +52,30 @@ export interface EmailSendResponse {
   id: string;
   threadId: string;
   labelIds: string[];
+}
+
+export interface EmailThread {
+  id: string;
+  subject: string;
+  emails: Array<{
+    id: string;
+    threadId: string;
+    subject: string;
+    from: string;
+    to: string;
+    body: string;
+    bodyHtml?: string;
+    date: Date;
+    isRead: boolean;
+    labels: string[];
+    attachments?: Array<{
+      filename: string;
+      mimeType: string;
+      size: number;
+      attachmentId: string;
+    }>;
+  }>;
+  lastMessageDate: Date;
+  messageCount: number;
+  participants: string[];
 } 

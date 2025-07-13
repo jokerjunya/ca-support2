@@ -198,9 +198,144 @@ router.post('/generate-reply', requireAuth, async (req, res) => {
       processing_time: generateReplyResponse.processing_time,
       source: generateReplyResponse.processing_time > 0 ? 'llm' : 'fallback'
     });
+
   } catch (error) {
-    console.error('返信生成エラー:', error);
-    return res.status(500).json({ error: '返信生成に失敗しました' });
+    console.error('AI返信生成エラー:', error);
+    return res.status(500).json({ error: 'AI返信生成に失敗しました' });
+  }
+});
+
+// 🧵 新機能: スレッド一覧取得
+router.get('/threads', requireAuth, async (req, res) => {
+  try {
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    
+    const maxResults = parseInt(req.query.maxResults as string) || 20;
+    const threads = await gmailService.getThreads(maxResults);
+    
+    return res.json({
+      success: true,
+      data: threads,
+      count: threads.length
+    });
+  } catch (error) {
+    console.error('スレッド取得エラー:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'スレッド取得に失敗しました'
+    });
+  }
+});
+
+// 🧵 新機能: 特定のスレッドを取得
+router.get('/threads/:threadId', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    
+    const thread = await gmailService.getThreadById(threadId);
+    
+    if (!thread) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'スレッドが見つかりません' 
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: thread
+    });
+  } catch (error) {
+    console.error('スレッド取得エラー:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'スレッド取得に失敗しました'
+    });
+  }
+});
+
+// 🧵 新機能: スレッドのメール一覧取得
+router.get('/threads/:threadId/emails', requireAuth, async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    
+    const emails = await gmailService.getEmailsByThread(threadId);
+    
+    return res.json({
+      success: true,
+      data: emails,
+      count: emails.length
+    });
+  } catch (error) {
+    console.error('スレッドメール取得エラー:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'スレッドメール取得に失敗しました'
+    });
+  }
+});
+
+// 🔧 新機能: Gmail API接続状況確認
+router.get('/api-status', requireAuth, async (req, res) => {
+  try {
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    const status = gmailService.getApiStatus();
+    
+    return res.json({
+      success: true,
+      data: {
+        ...status,
+        environment: {
+          NODE_ENV: process.env.NODE_ENV || 'development',
+          GMAIL_API_ENABLED: process.env.GMAIL_API_ENABLED || 'false',
+          HAS_GOOGLE_CLIENT_ID: !!process.env.GOOGLE_CLIENT_ID,
+          HAS_GOOGLE_CLIENT_SECRET: !!process.env.GOOGLE_CLIENT_SECRET,
+          USER_AUTHENTICATED: !!user,
+          USER_HAS_ACCESS_TOKEN: !!(user && user.accessToken)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('API状況確認エラー:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'API状況確認に失敗しました'
+    });
+  }
+});
+
+// 🧪 新機能: Gmail API接続テスト
+router.get('/test-gmail-connection', requireAuth, async (req, res) => {
+  try {
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    
+    // 基本情報取得テスト
+    const profile = await gmailService.getProfile();
+    
+    return res.json({
+      success: true,
+      message: 'Gmail API接続テスト成功',
+      data: {
+        emailAddress: profile.emailAddress,
+        totalMessages: profile.messagesTotal,
+        threadsTotal: profile.threadsTotal,
+        historyId: profile.historyId
+      }
+    });
+  } catch (error) {
+    console.error('Gmail API接続テストエラー:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Gmail API接続テストに失敗しました',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 

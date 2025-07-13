@@ -5,15 +5,21 @@ import { useRouter } from 'next/navigation';
 import EmailList from '../../components/EmailList';
 import EmailDetail from '../../components/EmailDetail';
 import ReplyComposer from '../../components/ReplyComposer';
-import { Email } from '../../types/email';
+import ThreadView from '../../components/ThreadView';
+import { Email, EmailThread } from '../../types/email';
 import LoginButton from '../../components/LoginButton';
+import { List, MessageSquare, RefreshCw } from 'lucide-react';
 
 export default function Dashboard() {
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
+  const [selectedThread, setSelectedThread] = useState<EmailThread | null>(null);
   const [isReplyMode, setIsReplyMode] = useState(false);
   const [emails, setEmails] = useState<Email[]>([]);
+  const [threads, setThreads] = useState<EmailThread[]>([]);
   const [loading, setLoading] = useState(true);
   const [authStatus, setAuthStatus] = useState<'loading' | 'authenticated' | 'unauthenticated'>('loading');
+  const [viewMode, setViewMode] = useState<'emails' | 'threads'>('emails');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const router = useRouter();
 
   // 認証状態確認
@@ -32,8 +38,8 @@ export default function Dashboard() {
         const data = await response.json();
         if (data.isAuthenticated) {
           setAuthStatus('authenticated');
-          // 認証済みの場合はメール取得
-          fetchEmails();
+          // 認証済みの場合はデータ取得
+          fetchData();
         } else {
           setAuthStatus('unauthenticated');
           // 認証されていない場合はホーム画面にリダイレクト
@@ -50,6 +56,13 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchData = async () => {
+    await Promise.all([
+      fetchEmails(),
+      fetchThreads()
+    ]);
   };
 
   const fetchEmails = async () => {
@@ -70,8 +83,41 @@ export default function Dashboard() {
     }
   };
 
+  const fetchThreads = async () => {
+    try {
+      const response = await fetch('/api/emails/threads', {
+        method: 'GET',
+        credentials: 'include',
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setThreads(data.data || []);
+      } else {
+        console.error('スレッド取得エラー');
+      }
+    } catch (error) {
+      console.error('スレッド取得エラー:', error);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchData();
+    setIsRefreshing(false);
+  };
+
   const handleEmailSelect = (email: Email) => {
     setSelectedEmail(email);
+    setIsReplyMode(false);
+  };
+
+  const handleThreadSelect = (thread: EmailThread) => {
+    setSelectedThread(thread);
+    // スレッドの最新メールを選択
+    if (thread.emails.length > 0) {
+      setSelectedEmail(thread.emails[thread.emails.length - 1]);
+    }
     setIsReplyMode(false);
   };
 
@@ -80,6 +126,13 @@ export default function Dashboard() {
   };
 
   const handleBackToEmail = () => {
+    setIsReplyMode(false);
+  };
+
+  const handleViewModeChange = (mode: 'emails' | 'threads') => {
+    setViewMode(mode);
+    setSelectedEmail(null);
+    setSelectedThread(null);
     setIsReplyMode(false);
   };
 
@@ -115,6 +168,14 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">Gmail Assistant</h1>
           <div className="flex items-center space-x-4">
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-spotify-gray hover:bg-spotify-light-gray text-white transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>更新</span>
+            </button>
             <LoginButton />
           </div>
         </div>
@@ -140,6 +201,38 @@ export default function Dashboard() {
                   <span className="text-spotify-light-gray">重要メール</span>
                   <span className="text-important-red">{emails.filter(e => e.important).length}</span>
                 </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-spotify-light-gray">スレッド数</span>
+                  <span className="text-white">{threads.length}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-spotify-gray p-4 rounded-lg">
+              <h3 className="text-sm font-medium text-spotify-light-gray mb-2">表示モード</h3>
+              <div className="space-y-2">
+                <button 
+                  onClick={() => handleViewModeChange('emails')}
+                  className={`w-full flex items-center space-x-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    viewMode === 'emails' 
+                      ? 'bg-spotify-green text-white' 
+                      : 'text-spotify-light-gray hover:text-white hover:bg-spotify-light-gray'
+                  }`}
+                >
+                  <List className="w-4 h-4" />
+                  <span>メール一覧</span>
+                </button>
+                <button 
+                  onClick={() => handleViewModeChange('threads')}
+                  className={`w-full flex items-center space-x-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    viewMode === 'threads' 
+                      ? 'bg-spotify-green text-white' 
+                      : 'text-spotify-light-gray hover:text-white hover:bg-spotify-light-gray'
+                  }`}
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>スレッド表示</span>
+                </button>
               </div>
             </div>
             
@@ -162,13 +255,29 @@ export default function Dashboard() {
 
         {/* メインコンテンツエリア */}
         <div className="flex-1 flex">
-          {/* メール一覧 */}
+          {/* メール一覧 / スレッド一覧 */}
           <div className="w-1/3 border-r border-spotify-gray">
-            <EmailList 
-              emails={emails}
-              selectedEmail={selectedEmail}
-              onEmailSelect={handleEmailSelect}
-            />
+            <div className="p-4 border-b border-spotify-gray">
+              <h2 className="text-lg font-semibold text-white">
+                {viewMode === 'threads' ? 'スレッド' : 'メール'}
+              </h2>
+            </div>
+            <div className="h-[calc(100%-60px)] overflow-y-auto">
+              {viewMode === 'threads' ? (
+                <ThreadView
+                  threads={threads}
+                  selectedThread={selectedThread}
+                  onThreadSelect={handleThreadSelect}
+                  onEmailSelect={handleEmailSelect}
+                />
+              ) : (
+                <EmailList 
+                  emails={emails}
+                  selectedEmail={selectedEmail}
+                  onEmailSelect={handleEmailSelect}
+                />
+              )}
+            </div>
           </div>
 
           {/* メール詳細 / 返信作成 */}
@@ -188,7 +297,7 @@ export default function Dashboard() {
                 <div className="text-center">
                   <div className="text-6xl text-spotify-gray mb-4">📧</div>
                   <p className="text-spotify-light-gray">
-                    メールを選択してください
+                    {viewMode === 'threads' ? 'スレッドを選択してください' : 'メールを選択してください'}
                   </p>
                 </div>
               </div>

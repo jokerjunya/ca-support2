@@ -5,7 +5,8 @@ import {
   GmailListResponse, 
   ParsedEmail, 
   EmailSendRequest,
-  EmailSendResponse 
+  EmailSendResponse,
+  EmailThread
 } from '../types/gmail';
 
 // モックデータ（開発・テスト用）
@@ -24,6 +25,32 @@ const mockEmails: ParsedEmail[] = [
     snippet: 'いつもお世話になっております。プロジェクトの進捗についてご報告いたします...'
   },
   {
+    id: 'mock_1_reply',
+    threadId: 'thread_1',
+    subject: 'Re: プロジェクトの進捗について',
+    from: 'user@example.com',
+    to: 'yamada@example.com',
+    date: new Date('2024-01-15T14:30:00Z'),
+    body: 'ご報告ありがとうございます。\n\nフェーズ1の完了、お疲れ様でした。\n\nフェーズ2についても順調に進められるよう、サポートいたします。\n\n何かご質問がございましたら、お気軽にお声がけください。',
+    read: true,
+    important: false,
+    labels: ['SENT', 'INBOX'],
+    snippet: 'ご報告ありがとうございます。フェーズ1の完了、お疲れ様でした...'
+  },
+  {
+    id: 'mock_1_reply2',
+    threadId: 'thread_1',
+    subject: 'Re: プロジェクトの進捗について',
+    from: 'yamada@example.com',
+    to: 'user@example.com',
+    date: new Date('2024-01-16T09:15:00Z'),
+    body: 'ありがとうございます。\n\nフェーズ2の詳細スケジュールについて、来週の会議で説明させていただきます。\n\n資料の準備ができましたら、事前にお送りいたします。',
+    read: false,
+    important: false,
+    labels: ['UNREAD', 'INBOX'],
+    snippet: 'ありがとうございます。フェーズ2の詳細スケジュールについて、来週の会議で説明...'
+  },
+  {
     id: 'mock_2',
     threadId: 'thread_2',
     subject: '会議の日程調整について',
@@ -37,6 +64,19 @@ const mockEmails: ParsedEmail[] = [
     snippet: 'お疲れ様です。来週の会議の日程について調整をお願いします...'
   },
   {
+    id: 'mock_2_reply',
+    threadId: 'thread_2',
+    subject: 'Re: 会議の日程調整について',
+    from: 'user@example.com',
+    to: 'tanaka@example.com',
+    date: new Date('2024-01-14T16:45:00Z'),
+    body: 'お疲れ様です。\n\n日程調整の件、ありがとうございます。\n\n1月22日（月）14:00-15:00でお願いいたします。\n\n会議室の予約も私の方で手配いたします。',
+    read: true,
+    important: false,
+    labels: ['SENT', 'INBOX'],
+    snippet: 'お疲れ様です。日程調整の件、ありがとうございます。1月22日（月）14:00-15:00でお願い...'
+  },
+  {
     id: 'mock_3',
     threadId: 'thread_3',
     subject: 'システムメンテナンスのお知らせ',
@@ -48,33 +88,100 @@ const mockEmails: ParsedEmail[] = [
     important: true,
     labels: ['UNREAD', 'INBOX', 'IMPORTANT'],
     snippet: '【重要】システムメンテナンスのお知らせ。下記の日程でシステムメンテナンスを実施...'
+  },
+  {
+    id: 'mock_4',
+    threadId: 'thread_4',
+    subject: '新機能のリリースについて',
+    from: 'dev-team@example.com',
+    to: 'user@example.com',
+    date: new Date('2024-01-12T13:20:00Z'),
+    body: 'お疲れ様です。\n\n新機能のリリースが完了しました。\n\n主な変更点：\n- ユーザーインターフェースの改善\n- パフォーマンスの向上\n- バグ修正\n\n詳細については、リリースノートをご確認ください。',
+    read: true,
+    important: false,
+    labels: ['INBOX'],
+    snippet: 'お疲れ様です。新機能のリリースが完了しました。主な変更点：ユーザーインターフェースの改善...'
+  },
+  {
+    id: 'mock_5',
+    threadId: 'thread_5',
+    subject: 'セキュリティ研修のご案内',
+    from: 'hr@example.com',
+    to: 'user@example.com',
+    date: new Date('2024-01-11T10:00:00Z'),
+    body: 'お疲れ様です。\n\n来月のセキュリティ研修についてご案内いたします。\n\n日時：2024年2月5日（月）13:00-17:00\n場所：第1会議室\n\n参加必須となりますので、ご都合をつけてご参加ください。',
+    read: false,
+    important: true,
+    labels: ['UNREAD', 'INBOX', 'IMPORTANT'],
+    snippet: 'お疲れ様です。来月のセキュリティ研修についてご案内いたします...'
   }
 ];
 
 export class GmailService {
   private gmail: any;
   private useRealAPI: boolean;
-  private forceTestMode: boolean;
+  private apiMode: 'real' | 'mock' | 'fallback';
+  private initError: string | null;
 
   constructor(user?: AuthUser) {
-    // Gmail API が利用できない場合は強制的にテストモードに
-    this.forceTestMode = !process.env.GMAIL_API_ENABLED || process.env.NODE_ENV === 'development';
-    this.useRealAPI = !!(user && user.accessToken && process.env.GOOGLE_CLIENT_ID && !this.forceTestMode);
+    this.initError = null;
     
-    if (this.useRealAPI && user) {
-      const oauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_CALLBACK_URL
-      );
+    // Gmail API使用可否の判定
+    const hasGmailApiConfig = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+    const isGmailApiEnabled = process.env.GMAIL_API_ENABLED === 'true';
+    const hasUserAuth = !!(user && user.accessToken);
 
-      oauth2Client.setCredentials({
-        access_token: user.accessToken,
-        refresh_token: user.refreshToken,
-      });
+    // 詳細な判定ロジック
+    if (!hasGmailApiConfig) {
+      this.apiMode = 'mock';
+      this.useRealAPI = false;
+      this.initError = 'Google OAuth認証情報が設定されていません';
+      console.log('🔧 Gmail API: モックモード - Google OAuth認証情報未設定');
+    } else if (!isGmailApiEnabled) {
+      this.apiMode = 'mock';
+      this.useRealAPI = false;
+      console.log('🔧 Gmail API: モックモード - GMAIL_API_ENABLED=false');
+    } else if (!hasUserAuth) {
+      this.apiMode = 'mock';
+      this.useRealAPI = false;
+      console.log('🔧 Gmail API: モックモード - ユーザー未認証');
+    } else {
+      // 実際のAPI使用を試行
+      try {
+        const oauth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          process.env.GOOGLE_CALLBACK_URL
+        );
 
-      this.gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+        oauth2Client.setCredentials({
+          access_token: user.accessToken,
+          refresh_token: user.refreshToken,
+        });
+
+        this.gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+        this.apiMode = 'real';
+        this.useRealAPI = true;
+        console.log('✅ Gmail API: 実APIモード - 認証成功');
+      } catch (error) {
+        this.apiMode = 'mock';
+        this.useRealAPI = false;
+        this.initError = `Gmail API初期化エラー: ${error}`;
+        console.error('❌ Gmail API: モックモードに切り替え -', error);
+      }
     }
+  }
+
+  /**
+   * 現在のAPI使用状況を取得
+   */
+  getApiStatus() {
+    return {
+      mode: this.apiMode,
+      useRealAPI: this.useRealAPI,
+      error: this.initError,
+      timestamp: new Date().toISOString()
+    };
   }
 
   /**
@@ -82,11 +189,13 @@ export class GmailService {
    */
   async getEmails(maxResults: number = 10, query?: string): Promise<ParsedEmail[]> {
     if (!this.useRealAPI) {
-      console.log('📧 モックデータを使用してメール一覧を取得');
+      console.log(`📧 ${this.apiMode === 'mock' ? 'モック' : 'フォールバック'}データを使用してメール一覧を取得`);
       return mockEmails.slice(0, maxResults);
     }
 
     try {
+      console.log(`📧 Gmail API: メール一覧取得開始 (最大${maxResults}件)`);
+      
       const listResponse = await this.gmail.users.messages.list({
         userId: 'me',
         maxResults,
@@ -94,9 +203,12 @@ export class GmailService {
       });
 
       if (!listResponse.data.messages) {
+        console.log('📧 Gmail API: メッセージが見つかりません');
         return [];
       }
 
+      console.log(`📧 Gmail API: ${listResponse.data.messages.length}件のメッセージを発見`);
+      
       const emails: ParsedEmail[] = [];
       for (const message of listResponse.data.messages) {
         const email = await this.getEmailById(message.id);
@@ -105,11 +217,17 @@ export class GmailService {
         }
       }
 
+      console.log(`✅ Gmail API: ${emails.length}件のメール取得完了`);
       return emails;
     } catch (error) {
-      console.error('Gmail API エラー:', error);
-      // Gmail API エラーの場合はモックデータにフォールバック
-      console.log('🔄 Gmail API エラーのため、モックデータにフォールバック');
+      console.error('❌ Gmail API エラー:', error);
+      
+      // API接続エラーの場合はフォールバックモードに変更
+      if (!this.apiMode.startsWith('fallback')) {
+        this.apiMode = 'fallback';
+        console.log('🔄 Gmail API エラーのため、フォールバックモードに切り替え');
+      }
+      
       return mockEmails.slice(0, maxResults);
     }
   }
@@ -232,6 +350,99 @@ export class GmailService {
   }
 
   /**
+   * Gmail プロフィール情報を取得
+   */
+  async getProfile() {
+    if (!this.useRealAPI) {
+      // モックプロフィール情報を返す
+      return {
+        emailAddress: 'user@example.com',
+        messagesTotal: mockEmails.length,
+        threadsTotal: new Set(mockEmails.map(e => e.threadId)).size,
+        historyId: '12345'
+      };
+    }
+
+    try {
+      const response = await this.gmail.users.getProfile({
+        userId: 'me'
+      });
+      
+      return {
+        emailAddress: response.data.emailAddress,
+        messagesTotal: response.data.messagesTotal,
+        threadsTotal: response.data.threadsTotal,
+        historyId: response.data.historyId
+      };
+    } catch (error) {
+      console.error('プロフィール取得エラー:', error);
+      throw new Error(`Gmail プロフィール取得に失敗しました: ${error}`);
+    }
+  }
+
+  /**
+   * スレッド一覧を取得
+   */
+  async getThreads(maxResults: number = 10): Promise<EmailThread[]> {
+    if (!this.useRealAPI) {
+      console.log('📧 モックデータを使用してスレッド一覧を取得');
+      return this.getMockThreads(maxResults);
+    }
+
+    try {
+      const emails = await this.getEmails(maxResults * 5); // より多くのメールを取得してスレッドを作成
+      return this.groupEmailsIntoThreads(emails);
+    } catch (error) {
+      console.error('スレッド取得エラー:', error);
+      return this.getMockThreads(maxResults);
+    }
+  }
+
+  /**
+   * 特定のスレッドのメール一覧を取得
+   */
+  async getEmailsByThread(threadId: string): Promise<ParsedEmail[]> {
+    if (!this.useRealAPI) {
+      console.log(`📧 モックデータからスレッド ${threadId} のメールを取得`);
+      return mockEmails.filter(email => email.threadId === threadId);
+    }
+
+    try {
+      // Gmail APIでスレッドを取得
+      const threadResponse = await this.gmail.users.threads.get({
+        userId: 'me',
+        id: threadId,
+        format: 'full'
+      });
+
+      const emails: ParsedEmail[] = [];
+      for (const message of threadResponse.data.messages || []) {
+        const email = this.parseGmailMessage(message);
+        if (email) {
+          emails.push(email);
+        }
+      }
+
+      return emails.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    } catch (error) {
+      console.error('スレッドメール取得エラー:', error);
+      return mockEmails.filter(email => email.threadId === threadId);
+    }
+  }
+
+  /**
+   * 特定のスレッドを取得
+   */
+  async getThreadById(threadId: string): Promise<EmailThread | null> {
+    const emails = await this.getEmailsByThread(threadId);
+    if (emails.length === 0) {
+      return null;
+    }
+
+    return this.createThreadFromEmails(emails);
+  }
+
+  /**
    * Gmail APIレスポンスをパース
    */
   private parseGmailMessage(gmailMessage: GmailMessage): ParsedEmail {
@@ -277,6 +488,92 @@ export class GmailService {
     ].filter(line => line !== '').join('\r\n');
 
     return email;
+  }
+
+  /**
+   * メール配列からスレッドオブジェクトを作成
+   */
+  private createThreadFromEmails(emails: ParsedEmail[]): EmailThread {
+    const sortedEmails = emails.sort((a, b) => 
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    const latestEmail = sortedEmails[sortedEmails.length - 1];
+    if (!latestEmail) {
+      throw new Error('メール配列が空です');
+    }
+
+    const participants = new Set<string>();
+    
+    sortedEmails.forEach(email => {
+      participants.add(email.from);
+      participants.add(email.to);
+    });
+
+    return {
+      id: latestEmail.threadId,
+      subject: latestEmail.subject,
+      emails: sortedEmails.map(email => ({
+        id: email.id,
+        threadId: email.threadId,
+        subject: email.subject,
+        from: email.from,
+        to: email.to,
+        body: email.body,
+        date: email.date,
+        isRead: email.read,
+        labels: email.labels
+      })),
+      lastMessageDate: latestEmail.date,
+      messageCount: sortedEmails.length,
+      participants: Array.from(participants).filter(p => p !== 'user@example.com')
+    };
+  }
+
+  /**
+   * モックスレッドデータを取得
+   */
+  private getMockThreads(maxResults: number): EmailThread[] {
+    const threadMap = new Map<string, ParsedEmail[]>();
+    
+    mockEmails.forEach(email => {
+      if (!threadMap.has(email.threadId)) {
+        threadMap.set(email.threadId, []);
+      }
+      threadMap.get(email.threadId)!.push(email);
+    });
+
+    const threads: EmailThread[] = [];
+    threadMap.forEach((threadEmails, threadId) => {
+      threads.push(this.createThreadFromEmails(threadEmails));
+    });
+
+    return threads
+      .sort((a, b) => new Date(b.lastMessageDate).getTime() - new Date(a.lastMessageDate).getTime())
+      .slice(0, maxResults);
+  }
+
+  /**
+   * メールをスレッドごとにグループ化
+   */
+  private groupEmailsIntoThreads(emails: ParsedEmail[]): EmailThread[] {
+    const threadMap = new Map<string, ParsedEmail[]>();
+    
+    emails.forEach(email => {
+      if (!threadMap.has(email.threadId)) {
+        threadMap.set(email.threadId, []);
+      }
+      threadMap.get(email.threadId)!.push(email);
+    });
+
+    const threads: EmailThread[] = [];
+    threadMap.forEach((threadEmails, threadId) => {
+      threads.push(this.createThreadFromEmails(threadEmails));
+    });
+
+    return threads.sort((a, b) => 
+      new Date(b.lastMessageDate).getTime() - new Date(a.lastMessageDate).getTime()
+    );
   }
 }
 
