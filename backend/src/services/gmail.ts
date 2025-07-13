@@ -601,17 +601,62 @@ export class GmailService {
     let body = '';
     let attachments: EmailAttachment[] = [];
 
+    console.log(`📧 メール本文抽出開始 - ID: ${gmailMessage.id}`);
+    console.log(`📧 payload.body.data: ${gmailMessage.payload.body.data ? '存在' : '空'}`);
+    console.log(`📧 payload.parts: ${gmailMessage.payload.parts ? gmailMessage.payload.parts.length + '個' : '空'}`);
+
+    // 直接bodyにデータがある場合
     if (gmailMessage.payload.body.data) {
-      body = Buffer.from(gmailMessage.payload.body.data, 'base64').toString();
-    } else if (gmailMessage.payload.parts) {
-      // テキスト部分を抽出
-      const textPart = gmailMessage.payload.parts.find(part => part.mimeType === 'text/plain');
-      if (textPart?.body.data) {
-        body = Buffer.from(textPart.body.data, 'base64').toString();
+      try {
+        body = Buffer.from(gmailMessage.payload.body.data, 'base64').toString('utf-8');
+        console.log(`📧 直接body取得成功 - 長さ: ${body.length}`);
+      } catch (error) {
+        console.error('📧 直接body取得エラー:', error);
+      }
+    } 
+    // partsから本文を抽出
+    else if (gmailMessage.payload.parts) {
+      console.log(`📧 partsから本文抽出開始`);
+      
+      // text/plain を優先的に検索
+      const textPart = this.findTextPart(gmailMessage.payload.parts, 'text/plain');
+      if (textPart && textPart.body && textPart.body.data) {
+        try {
+          body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+          console.log(`📧 text/plain取得成功 - 長さ: ${body.length}`);
+        } catch (error) {
+          console.error('📧 text/plain取得エラー:', error);
+        }
+      }
+
+      // text/plain が見つからない場合は text/html を試す
+      if (!body) {
+        const htmlPart = this.findTextPart(gmailMessage.payload.parts, 'text/html');
+        if (htmlPart && htmlPart.body && htmlPart.body.data) {
+          try {
+            const htmlBody = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
+            // 簡単なHTMLタグ除去
+            body = htmlBody.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+            console.log(`📧 text/html取得成功 - 長さ: ${body.length}`);
+          } catch (error) {
+            console.error('📧 text/html取得エラー:', error);
+          }
+        }
       }
 
       // 添付ファイルを抽出
       attachments = this.extractAttachments(gmailMessage.payload.parts);
+    }
+
+    // 本文が空の場合はsnippetを使用
+    if (!body && gmailMessage.snippet) {
+      body = gmailMessage.snippet;
+      console.log(`📧 snippetを本文として使用 - 長さ: ${body.length}`);
+    }
+
+    console.log(`📧 最終的な本文長: ${body.length}`);
+    if (body.length > 0) {
+      console.log(`📧 本文プレビュー: ${body.substring(0, 100)}...`);
     }
 
     return {
@@ -628,6 +673,22 @@ export class GmailService {
       snippet: gmailMessage.snippet,
       attachments: attachments.length > 0 ? attachments : []
     };
+  }
+
+  /**
+   * 指定されたMIMEタイプの部分を検索
+   */
+  private findTextPart(parts: any[], mimeType: string): any {
+    for (const part of parts) {
+      if (part.mimeType === mimeType) {
+        return part;
+      }
+      if (part.parts) {
+        const result = this.findTextPart(part.parts, mimeType);
+        if (result) return result;
+      }
+    }
+    return null;
   }
 
   /**

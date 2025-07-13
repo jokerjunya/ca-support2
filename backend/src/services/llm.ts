@@ -134,6 +134,7 @@ export class LLMService {
         model: request.model || this.defaultModel,
         prompt: request.prompt,
         stream: false, // 強制的にfalseに設定
+        think: false, // Qwen3のthinking無効化（最新Ollama対応）
         options: {
           temperature: request.options?.temperature || 0.7,
           top_p: request.options?.top_p || 0.9,
@@ -261,7 +262,13 @@ export class LLMService {
     return `
 あなたは優秀なメールアシスタントです。以下のメールに対する適切な返信を生成してください。
 
-enable_thinking=False
+/no_think
+
+【重要指示】
+- 思考プロセスを出力しないでください
+- <think>タグや<thinking>タグを使用しないでください  
+- 分析や検討過程を記述しないでください
+- 直接的な返信内容のみを出力してください
 
 【元メール情報】
 件名: ${originalEmail.subject}
@@ -275,11 +282,11 @@ enable_thinking=False
 - 相手のメールの内容を理解し、適切に対応してください
 ${customInstructions ? `- 追加指示: ${customInstructions}` : ''}
 
-【重要】
+【出力形式】
 - 返信内容のみを出力してください
 - 挨拶から始めて、要点を述べ、適切な結びの文で終わってください
 - 件名は含めないでください
-- <think>タグは使用しないでください
+- 思考過程や分析は含めないでください
 
 返信内容:
 `;
@@ -302,18 +309,90 @@ ${customInstructions ? `- 追加指示: ${customInstructions}` : ''}
   }
 
   /**
-   * LLMレスポンスから返信内容を抽出
+   * LLMレスポンスから返信内容を抽出（改善版）
    */
   private extractReplyFromResponse(response: string): string {
-    // <think>タグを除去
-    let cleanResponse = response.replace(/<think>[\s\S]*?<\/think>/g, '');
+    console.log(`🔍 返信抽出開始 - 元の応答長: ${response.length}`);
+    console.log(`🔍 元の応答プレビュー: ${response.substring(0, 200)}...`);
     
-    // 不要なプレフィックスを除去
-    cleanResponse = cleanResponse.replace(/^返信内容:\s*/, '');
-    cleanResponse = cleanResponse.replace(/^返信:\s*/, '');
+    let cleanResponse = response;
     
-    // 余分な改行を整理
+    // 1. 世の中の事例に基づく強力な思考ブロック除去
+    // <think>...</think>タグを除去（複数行、大文字小文字無視、入れ子対応）
+    cleanResponse = cleanResponse.replace(/<think[\s\S]*?<\/think>/gi, '');
+    
+    // 2. 思考関連の別パターンも除去
+    cleanResponse = cleanResponse.replace(/<thinking[\s\S]*?<\/thinking>/gi, '');
+    cleanResponse = cleanResponse.replace(/```thinking[\s\S]*?```/gi, '');
+    
+    // 3. 思考プロセスの開始パターンを除去
+    cleanResponse = cleanResponse.replace(/^(思考|考え|分析|検討)[:：]\s*/gim, '');
+    cleanResponse = cleanResponse.replace(/^(Let me think|I need to think|思考プロセス)[\s\S]*?^(答え|回答|返信|Reply)[:：]\s*/gim, '');
+    
+    // 4. 一般的な思考プロセス文章パターンを除去
+    cleanResponse = cleanResponse.replace(/^(まず|最初に|それでは|さて|では|よって|つまり|そこで)[、，]\s*/, '');
+    cleanResponse = cleanResponse.replace(/^(これは|この場合|この状況では|この問題について)[、，]\s*/, '');
+    
+    // 5. 不要なプレフィックスを除去
+    cleanResponse = cleanResponse.replace(/^(返信内容|返信|回答|答え)[:：]\s*/gim, '');
+    cleanResponse = cleanResponse.replace(/^(reply|response|answer)[:：]\s*/gim, '');
+    
+    // 6. 行頭の不要な記号を除去
+    cleanResponse = cleanResponse.replace(/^[-–—>\s]+/gm, '');
+    
+    // 7. 連続する改行を整理
+    cleanResponse = cleanResponse.replace(/\n\s*\n\s*\n/g, '\n\n');
     cleanResponse = cleanResponse.trim();
+    
+    console.log(`🔍 思考ブロック除去後の長さ: ${cleanResponse.length}`);
+    
+    // 8. 抽出結果の検証と改善
+    if (cleanResponse.length < 10) {
+      console.log('⚠️ 抽出結果が短すぎます。フォールバック処理を実行');
+      
+      // フォールバック1: 最後の文章を抽出
+      const sentences = response.split(/[。！？\n]/).filter(s => s.trim().length > 5);
+      if (sentences.length > 0) {
+        const lastSentence = sentences[sentences.length - 1];
+        if (lastSentence && lastSentence.trim()) {
+          cleanResponse = lastSentence.trim();
+          console.log(`🔄 フォールバック1適用 - 最後の文章: ${cleanResponse}`);
+        }
+      }
+      
+      // フォールバック2: 最初の実質的な内容を抽出
+      if (cleanResponse.length < 10) {
+        const lines = response.split('\n').filter(line => {
+          const trimmed = line.trim();
+          return trimmed.length > 10 && 
+                 !trimmed.startsWith('<') && 
+                 !trimmed.includes('思考') && 
+                 !trimmed.includes('考え') &&
+                 !trimmed.includes('分析');
+        });
+        if (lines.length > 0) {
+          const firstLine = lines[0];
+          if (firstLine && firstLine.trim()) {
+            cleanResponse = firstLine.trim();
+            console.log(`🔄 フォールバック2適用 - 実質的内容: ${cleanResponse}`);
+          }
+        }
+      }
+      
+      // フォールバック3: デフォルトメッセージ
+      if (cleanResponse.length < 10) {
+        cleanResponse = 'ご連絡いただき、ありがとうございます。詳細についてお聞かせください。';
+        console.log(`🔄 フォールバック3適用 - デフォルトメッセージ使用`);
+      }
+    }
+    
+    // 9. 最終的な整理
+    cleanResponse = cleanResponse.replace(/^\s*["'`]|["'`]\s*$/g, ''); // 引用符除去
+    cleanResponse = cleanResponse.replace(/\s+/g, ' '); // 余分なスペース除去
+    cleanResponse = cleanResponse.trim();
+    
+    console.log(`✅ 最終抽出結果 - 長さ: ${cleanResponse.length}`);
+    console.log(`✅ 最終内容プレビュー: ${cleanResponse.substring(0, 100)}...`);
     
     return cleanResponse;
   }
