@@ -199,8 +199,24 @@ router.post('/send', requireAuth, async (req, res) => {
     const gmailService = createGmailService(user);
     const emailData: EmailSendRequest = req.body;
     
+    // 📧 デバッグ: リクエストボディの詳細ログ
+    console.log('📧 メール送信リクエスト受信:');
+    console.log(`📧 to: "${emailData.to}"`);
+    console.log(`📧 subject: "${emailData.subject}"`);
+    console.log(`📧 body length: ${emailData.body ? emailData.body.length : 'undefined'}`);
+    console.log(`📧 body content: "${emailData.body}"`);
+    console.log(`📧 cc: "${emailData.cc || 'なし'}"`);
+    console.log(`📧 bcc: "${emailData.bcc || 'なし'}"`);
+    console.log(`📧 threadId: "${emailData.threadId || 'なし'}"`);
+    console.log(`📧 raw request body:`, JSON.stringify(req.body, null, 2));
+    
     // バリデーション
     if (!emailData.to || !emailData.subject || !emailData.body) {
+      console.error('📧 バリデーションエラー:', {
+        to: !!emailData.to,
+        subject: !!emailData.subject,
+        body: !!emailData.body
+      });
       return res.status(400).json({
         success: false,
         error: '必須フィールドが不足しています (to, subject, body)'

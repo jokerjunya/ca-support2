@@ -463,6 +463,12 @@ export class GmailService {
    * メールを送信
    */
   async sendEmail(emailData: EmailSendRequest): Promise<EmailSendResponse | null> {
+    console.log('📤 Gmail sendEmail メソッド開始');
+    console.log(`📤 sendEmail - to: "${emailData.to}"`);
+    console.log(`📤 sendEmail - subject: "${emailData.subject}"`);
+    console.log(`📤 sendEmail - body length: ${emailData.body ? emailData.body.length : 'undefined'}`);
+    console.log(`📤 sendEmail - body content: "${emailData.body}"`);
+    
     if (!this.useRealAPI) {
       console.log('📤 モックメール送信:', emailData);
       return {
@@ -474,6 +480,11 @@ export class GmailService {
 
     try {
       const email = this.createEmailString(emailData);
+      console.log('📤 作成されたメール文字列:');
+      console.log('=== EMAIL STRING START ===');
+      console.log(email);
+      console.log('=== EMAIL STRING END ===');
+      
       const response = await this.gmail.users.messages.send({
         userId: 'me',
         requestBody: {
@@ -481,6 +492,7 @@ export class GmailService {
         }
       });
 
+      console.log('📤 Gmail API送信完了:', response.data);
       return {
         id: response.data.id,
         threadId: response.data.threadId,
@@ -929,20 +941,44 @@ export class GmailService {
   }
 
   /**
-   * 送信用メール文字列を作成
+   * 送信用メール文字列を作成（RFC 2822準拠）
    */
   private createEmailString(emailData: EmailSendRequest): string {
-    const email = [
+    console.log('📝 createEmailString メソッド開始');
+    console.log(`📝 input emailData:`, JSON.stringify(emailData, null, 2));
+    
+    // RFC 2822必須ヘッダー
+    const dateHeader = new Date().toUTCString().replace(/GMT/, '+0000');
+    const fromHeader = 'From: Gmail Assistant <noreply@gmail.com>'; // Gmail APIが実際の送信者に置き換え
+    const messageId = `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@gmail.com>`;
+    
+    // ヘッダー部分を構築（RFC 2822準拠）
+    const headers = [
+      fromHeader,
       `To: ${emailData.to}`,
-      emailData.cc ? `Cc: ${emailData.cc}` : '',
-      emailData.bcc ? `Bcc: ${emailData.bcc}` : '',
+      emailData.cc ? `Cc: ${emailData.cc}` : null,
+      emailData.bcc ? `Bcc: ${emailData.bcc}` : null,
       `Subject: ${emailData.subject}`,
-      emailData.inReplyTo ? `In-Reply-To: ${emailData.inReplyTo}` : '',
+      `Date: ${dateHeader}`,
+      `Message-ID: ${messageId}`,
+      emailData.inReplyTo ? `In-Reply-To: ${emailData.inReplyTo}` : null,
+      'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=utf-8',
-      '',
-      emailData.body
-    ].filter(line => line !== '').join('\r\n');
+      'Content-Transfer-Encoding: 7bit'
+    ].filter(header => header !== null); // nullのみフィルタリング
+    
+    // RFC 2822準拠: ヘッダー + 空行 + 本文
+    const email = [
+      ...headers,
+      '', // ヘッダーと本文を分ける必須の空行
+      emailData.body || '' // 本文
+    ].join('\r\n');
 
+    console.log(`📝 RFC 2822準拠メール作成完了 - 総長: ${email.length}`);
+    console.log(`📝 ヘッダー数: ${headers.length}`);
+    console.log(`📝 本文長: ${emailData.body ? emailData.body.length : 0}`);
+    console.log(`📝 本文内容: "${emailData.body}"`);
+    
     return email;
   }
 
