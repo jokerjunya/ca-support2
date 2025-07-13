@@ -21,9 +21,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className={`${inter.className} bg-spotify-black text-spotify-white`}>
-        <div className="min-h-screen bg-gradient-to-br from-spotify-black via-spotify-dark-gray to-spotify-dark">
-          {children}
-        </div>
+        {children}
       </body>
     </html>
   );
