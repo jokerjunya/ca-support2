@@ -38,10 +38,21 @@ export interface ParsedEmail {
   important: boolean;
   labels: string[];
   snippet: string;
+  attachments: EmailAttachment[];
+}
+
+export interface EmailAttachment {
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId: string;
+  data?: string; // base64 encoded data
 }
 
 export interface EmailSendRequest {
   to: string;
+  cc?: string;
+  bcc?: string;
   subject: string;
   body: string;
   threadId?: string;

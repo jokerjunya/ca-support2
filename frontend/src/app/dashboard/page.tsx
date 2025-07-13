@@ -5,21 +5,28 @@ import { useRouter } from 'next/navigation';
 import EmailList from '../../components/EmailList';
 import EmailDetail from '../../components/EmailDetail';
 import ReplyComposer from '../../components/ReplyComposer';
+import NewEmailComposer from '../../components/NewEmailComposer';
 import ThreadView from '../../components/ThreadView';
-import { Email, EmailThread } from '../../types/email';
+import EmailSearchBar, { SearchFilters } from '../../components/EmailSearchBar';
+import DraftList from '../../components/DraftList';
+import { Email, EmailThread } from '@/types/email';
 import LoginButton from '../../components/LoginButton';
-import { List, MessageSquare, RefreshCw } from 'lucide-react';
+import { List, MessageSquare, RefreshCw, Plus, FileText } from 'lucide-react';
 
 export default function Dashboard() {
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [selectedThread, setSelectedThread] = useState<EmailThread | null>(null);
   const [isReplyMode, setIsReplyMode] = useState(false);
+  const [isNewEmailMode, setIsNewEmailMode] = useState(false);
   const [emails, setEmails] = useState<Email[]>([]);
   const [threads, setThreads] = useState<EmailThread[]>([]);
   const [loading, setLoading] = useState(true);
   const [authStatus, setAuthStatus] = useState<'loading' | 'authenticated' | 'unauthenticated'>('loading');
   const [viewMode, setViewMode] = useState<'emails' | 'threads'>('emails');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [searchFilters, setSearchFilters] = useState<SearchFilters | null>(null);
+  const [showDraftList, setShowDraftList] = useState(false);
+  const [loadDraftId, setLoadDraftId] = useState<string | null>(null);
   const router = useRouter();
 
   // 認証状態確認
@@ -65,9 +72,26 @@ export default function Dashboard() {
     ]);
   };
 
-  const fetchEmails = async () => {
+  const fetchEmails = async (filters?: SearchFilters) => {
     try {
-      const response = await fetch('/api/emails', {
+      // 検索パラメーターを構築
+      const params = new URLSearchParams();
+      
+      if (filters) {
+        if (filters.query) params.append('query', filters.query);
+        if (filters.sender) params.append('sender', filters.sender);
+        if (filters.subject) params.append('subject', filters.subject);
+        if (filters.hasAttachment) params.append('hasAttachment', 'true');
+        if (filters.dateRange.start) params.append('dateStart', filters.dateRange.start);
+        if (filters.dateRange.end) params.append('dateEnd', filters.dateRange.end);
+        if (filters.isRead !== undefined) params.append('isRead', filters.isRead.toString());
+        if (filters.isImportant !== undefined) params.append('isImportant', filters.isImportant.toString());
+      }
+
+      const url = `/api/emails${params.toString() ? `?${params.toString()}` : ''}`;
+      console.log('🔍 検索リクエスト:', url);
+      
+      const response = await fetch(url, {
         method: 'GET',
         credentials: 'include',
       });
@@ -75,6 +99,7 @@ export default function Dashboard() {
       if (response.ok) {
         const data = await response.json();
         setEmails(data.data || []);
+        console.log(`✅ ${data.count}件のメールを取得`);
       } else {
         console.error('メール取得エラー');
       }
@@ -129,11 +154,59 @@ export default function Dashboard() {
     setIsReplyMode(false);
   };
 
+  const handleNewEmailClick = () => {
+    setIsNewEmailMode(true);
+    setSelectedEmail(null);
+    setSelectedThread(null);
+    setIsReplyMode(false);
+    setLoadDraftId(null);
+  };
+
+  const handleBackToList = () => {
+    setIsNewEmailMode(false);
+    setIsReplyMode(false);
+    setLoadDraftId(null);
+  };
+
   const handleViewModeChange = (mode: 'emails' | 'threads') => {
     setViewMode(mode);
     setSelectedEmail(null);
     setSelectedThread(null);
     setIsReplyMode(false);
+    setIsNewEmailMode(false);
+  };
+
+  const handleSearch = (filters: SearchFilters) => {
+    console.log('🔍 検索開始:', filters);
+    setSearchFilters(filters);
+    fetchEmails(filters);
+    setSelectedEmail(null);
+    setSelectedThread(null);
+    setIsReplyMode(false);
+    setIsNewEmailMode(false);
+  };
+
+  const handleClearSearch = () => {
+    console.log('🔍 検索クリア');
+    setSearchFilters(null);
+    fetchEmails();
+    setSelectedEmail(null);
+    setSelectedThread(null);
+    setIsReplyMode(false);
+    setIsNewEmailMode(false);
+  };
+
+  const handleShowDraftList = () => {
+    setShowDraftList(true);
+  };
+
+  const handleLoadDraft = (draftId: string) => {
+    setLoadDraftId(draftId);
+    setIsNewEmailMode(true);
+    setSelectedEmail(null);
+    setSelectedThread(null);
+    setIsReplyMode(false);
+    setShowDraftList(false);
   };
 
   // 認証状態確認中
@@ -165,7 +238,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-spotify-dark">
       {/* ヘッダー */}
       <header className="bg-spotify-dark-gray border-b border-spotify-gray p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-white">Gmail Assistant</h1>
           <div className="flex items-center space-x-4">
             <button
@@ -178,6 +251,15 @@ export default function Dashboard() {
             </button>
             <LoginButton />
           </div>
+        </div>
+        
+        {/* 検索バー */}
+        <div className="max-w-2xl mx-auto">
+          <EmailSearchBar
+            onSearch={handleSearch}
+            onClear={handleClearSearch}
+            initialFilters={searchFilters || undefined}
+          />
         </div>
       </header>
 
@@ -245,8 +327,19 @@ export default function Dashboard() {
                 <button className="w-full text-left text-sm text-spotify-light-gray hover:text-white transition-colors">
                   重要メール表示
                 </button>
-                <button className="w-full text-left text-sm text-spotify-light-gray hover:text-white transition-colors">
-                  新規メール作成
+                <button 
+                  onClick={handleNewEmailClick}
+                  className="w-full flex items-center space-x-2 px-3 py-2 rounded-lg text-sm text-spotify-light-gray hover:text-white hover:bg-spotify-light-gray transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>新規メール作成</span>
+                </button>
+                <button 
+                  onClick={handleShowDraftList}
+                  className="w-full flex items-center space-x-2 px-3 py-2 rounded-lg text-sm text-spotify-light-gray hover:text-white hover:bg-spotify-light-gray transition-colors"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>下書き一覧</span>
                 </button>
               </div>
             </div>
@@ -258,9 +351,16 @@ export default function Dashboard() {
           {/* メール一覧 / スレッド一覧 */}
           <div className="w-1/3 border-r border-spotify-gray">
             <div className="p-4 border-b border-spotify-gray">
-              <h2 className="text-lg font-semibold text-white">
-                {viewMode === 'threads' ? 'スレッド' : 'メール'}
-              </h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-white">
+                  {viewMode === 'threads' ? 'スレッド' : 'メール'}
+                </h2>
+                {searchFilters && (
+                  <span className="text-xs text-spotify-green bg-spotify-green/20 px-2 py-1 rounded">
+                    検索中
+                  </span>
+                )}
+              </div>
             </div>
             <div className="h-[calc(100%-60px)] overflow-y-auto">
               {viewMode === 'threads' ? (
@@ -280,9 +380,14 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* メール詳細 / 返信作成 */}
+          {/* メール詳細 / 返信作成 / 新規メール作成 */}
           <div className="flex-1">
-            {isReplyMode && selectedEmail ? (
+            {isNewEmailMode ? (
+              <NewEmailComposer
+                onBack={handleBackToList}
+                loadDraftId={loadDraftId || undefined}
+              />
+            ) : isReplyMode && selectedEmail ? (
               <ReplyComposer
                 email={selectedEmail}
                 onBack={handleBackToEmail}
@@ -305,6 +410,14 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* 下書き一覧モーダル */}
+      {showDraftList && (
+        <DraftList
+          onLoadDraft={handleLoadDraft}
+          onClose={() => setShowDraftList(false)}
+        />
+      )}
     </div>
   );
 } 

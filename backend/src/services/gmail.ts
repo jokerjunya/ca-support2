@@ -6,7 +6,8 @@ import {
   ParsedEmail, 
   EmailSendRequest,
   EmailSendResponse,
-  EmailThread
+  EmailThread,
+  EmailAttachment
 } from '../types/gmail';
 
 // モックデータ（開発・テスト用）
@@ -22,7 +23,21 @@ const mockEmails: ParsedEmail[] = [
     read: false,
     important: false,
     labels: ['UNREAD', 'INBOX'],
-    snippet: 'いつもお世話になっております。プロジェクトの進捗についてご報告いたします...'
+    snippet: 'いつもお世話になっております。プロジェクトの進捗についてご報告いたします...',
+    attachments: [
+      {
+        filename: 'project_report.pdf',
+        mimeType: 'application/pdf',
+        size: 1024000,
+        attachmentId: 'mock_attachment_1'
+      },
+      {
+        filename: 'schedule.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        size: 256000,
+        attachmentId: 'mock_attachment_2'
+      }
+    ]
   },
   {
     id: 'mock_1_reply',
@@ -35,7 +50,8 @@ const mockEmails: ParsedEmail[] = [
     read: true,
     important: false,
     labels: ['SENT', 'INBOX'],
-    snippet: 'ご報告ありがとうございます。フェーズ1の完了、お疲れ様でした...'
+    snippet: 'ご報告ありがとうございます。フェーズ1の完了、お疲れ様でした...',
+    attachments: []
   },
   {
     id: 'mock_1_reply2',
@@ -48,7 +64,8 @@ const mockEmails: ParsedEmail[] = [
     read: false,
     important: false,
     labels: ['UNREAD', 'INBOX'],
-    snippet: 'ありがとうございます。フェーズ2の詳細スケジュールについて、来週の会議で説明...'
+    snippet: 'ありがとうございます。フェーズ2の詳細スケジュールについて、来週の会議で説明...',
+    attachments: []
   },
   {
     id: 'mock_2',
@@ -61,7 +78,8 @@ const mockEmails: ParsedEmail[] = [
     read: true,
     important: false,
     labels: ['INBOX'],
-    snippet: 'お疲れ様です。来週の会議の日程について調整をお願いします...'
+    snippet: 'お疲れ様です。来週の会議の日程について調整をお願いします...',
+    attachments: []
   },
   {
     id: 'mock_2_reply',
@@ -74,7 +92,8 @@ const mockEmails: ParsedEmail[] = [
     read: true,
     important: false,
     labels: ['SENT', 'INBOX'],
-    snippet: 'お疲れ様です。日程調整の件、ありがとうございます。1月22日（月）14:00-15:00でお願い...'
+    snippet: 'お疲れ様です。日程調整の件、ありがとうございます。1月22日（月）14:00-15:00でお願い...',
+    attachments: []
   },
   {
     id: 'mock_3',
@@ -87,7 +106,8 @@ const mockEmails: ParsedEmail[] = [
     read: false,
     important: true,
     labels: ['UNREAD', 'INBOX', 'IMPORTANT'],
-    snippet: '【重要】システムメンテナンスのお知らせ。下記の日程でシステムメンテナンスを実施...'
+    snippet: '【重要】システムメンテナンスのお知らせ。下記の日程でシステムメンテナンスを実施...',
+    attachments: []
   },
   {
     id: 'mock_4',
@@ -100,7 +120,15 @@ const mockEmails: ParsedEmail[] = [
     read: true,
     important: false,
     labels: ['INBOX'],
-    snippet: 'お疲れ様です。新機能のリリースが完了しました。主な変更点：ユーザーインターフェースの改善...'
+    snippet: 'お疲れ様です。新機能のリリースが完了しました。主な変更点：ユーザーインターフェースの改善...',
+    attachments: [
+      {
+        filename: 'release_notes.pdf',
+        mimeType: 'application/pdf',
+        size: 512000,
+        attachmentId: 'mock_attachment_3'
+      }
+    ]
   },
   {
     id: 'mock_5',
@@ -113,7 +141,8 @@ const mockEmails: ParsedEmail[] = [
     read: false,
     important: true,
     labels: ['UNREAD', 'INBOX', 'IMPORTANT'],
-    snippet: 'お疲れ様です。来月のセキュリティ研修についてご案内いたします...'
+    snippet: 'お疲れ様です。来月のセキュリティ研修についてご案内いたします...',
+    attachments: []
   }
 ];
 
@@ -182,6 +211,61 @@ export class GmailService {
       error: this.initError,
       timestamp: new Date().toISOString()
     };
+  }
+
+  /**
+   * 高度な検索でメール一覧を取得
+   */
+  async searchEmails(maxResults: number = 10, filters: any): Promise<ParsedEmail[]> {
+    if (!this.useRealAPI) {
+      console.log(`📧 ${this.apiMode === 'mock' ? 'モック' : 'フォールバック'}データを使用して検索`);
+      return this.filterMockEmails(mockEmails, filters).slice(0, maxResults);
+    }
+
+    try {
+      console.log(`🔍 Gmail API: 高度な検索開始`);
+      console.log(`   - フィルター:`, filters);
+      
+      // Gmail検索クエリを構築
+      const gmailQuery = this.buildGmailQuery(filters);
+      console.log(`   - Gmail検索クエリ: ${gmailQuery}`);
+
+      const listResponse = await this.gmail.users.messages.list({
+        userId: 'me',
+        maxResults,
+        q: gmailQuery || 'in:inbox',
+      });
+
+      if (!listResponse.data.messages) {
+        console.log('📧 Gmail API: 検索結果が見つかりません');
+        return [];
+      }
+
+      console.log(`📧 Gmail API: ${listResponse.data.messages.length}件の検索結果を発見`);
+      
+      const emails: ParsedEmail[] = [];
+      for (const message of listResponse.data.messages) {
+        const email = await this.getEmailById(message.id);
+        if (email) {
+          emails.push(email);
+        }
+      }
+
+      // フロントエンド側のフィルターを適用
+      const filteredEmails = this.filterEmails(emails, filters);
+      console.log(`✅ Gmail API: ${filteredEmails.length}件の検索完了`);
+      return filteredEmails;
+    } catch (error) {
+      console.error('❌ Gmail API 検索エラー:', error);
+      
+      // API接続エラーの場合はフォールバックモードに変更
+      if (!this.apiMode.startsWith('fallback')) {
+        this.apiMode = 'fallback';
+        console.log('🔄 Gmail API エラーのため、フォールバックモードに切り替え');
+      }
+      
+      return this.filterMockEmails(mockEmails, filters).slice(0, maxResults);
+    }
   }
 
   /**
@@ -306,6 +390,71 @@ export class GmailService {
         email.labels = email.labels.filter(label => label !== 'UNREAD');
         return true;
       }
+      return false;
+    }
+  }
+
+  /**
+   * メールを削除（ゴミ箱へ移動）
+   */
+  async deleteEmail(messageId: string): Promise<boolean> {
+    if (!this.useRealAPI) {
+      // モックデータの場合は配列から削除
+      console.log(`🗑️ モックデータのメール ${messageId} を削除します`);
+      const index = mockEmails.findIndex(email => email.id === messageId);
+      if (index !== -1) {
+        mockEmails.splice(index, 1);
+        return true;
+      }
+      return false;
+    }
+
+    try {
+      console.log(`🗑️ Gmail API: メール ${messageId} をゴミ箱に移動します`);
+      
+      const response = await this.gmail.users.messages.trash({
+        userId: 'me',
+        id: messageId
+      });
+
+      console.log(`✅ Gmail API: メール削除完了 - ${messageId}`);
+      return response.status === 200;
+    } catch (error) {
+      console.error('❌ Gmail API 削除エラー:', error);
+      return false;
+    }
+  }
+
+  /**
+   * メールをアーカイブ
+   */
+  async archiveEmail(messageId: string): Promise<boolean> {
+    if (!this.useRealAPI) {
+      // モックデータの場合はINBOXラベルを削除
+      console.log(`📦 モックデータのメール ${messageId} をアーカイブします`);
+      const mockEmail = mockEmails.find(email => email.id === messageId);
+      if (mockEmail) {
+        mockEmail.labels = mockEmail.labels.filter(label => label !== 'INBOX');
+        return true;
+      }
+      return false;
+    }
+
+    try {
+      console.log(`📦 Gmail API: メール ${messageId} をアーカイブします`);
+      
+      const response = await this.gmail.users.messages.modify({
+        userId: 'me',
+        id: messageId,
+        requestBody: {
+          removeLabelIds: ['INBOX']
+        }
+      });
+
+      console.log(`✅ Gmail API: メールアーカイブ完了 - ${messageId}`);
+      return response.status === 200;
+    } catch (error) {
+      console.error('❌ Gmail API アーカイブエラー:', error);
       return false;
     }
   }
@@ -450,13 +599,19 @@ export class GmailService {
     const getHeader = (name: string) => headers.find(h => h.name === name)?.value || '';
 
     let body = '';
+    let attachments: EmailAttachment[] = [];
+
     if (gmailMessage.payload.body.data) {
       body = Buffer.from(gmailMessage.payload.body.data, 'base64').toString();
     } else if (gmailMessage.payload.parts) {
+      // テキスト部分を抽出
       const textPart = gmailMessage.payload.parts.find(part => part.mimeType === 'text/plain');
       if (textPart?.body.data) {
         body = Buffer.from(textPart.body.data, 'base64').toString();
       }
+
+      // 添付ファイルを抽出
+      attachments = this.extractAttachments(gmailMessage.payload.parts);
     }
 
     return {
@@ -470,8 +625,246 @@ export class GmailService {
       read: !gmailMessage.labelIds.includes('UNREAD'),
       important: gmailMessage.labelIds.includes('IMPORTANT'),
       labels: gmailMessage.labelIds,
-      snippet: gmailMessage.snippet
+      snippet: gmailMessage.snippet,
+      attachments: attachments.length > 0 ? attachments : []
     };
+  }
+
+  /**
+   * 添付ファイルを抽出
+   */
+  private extractAttachments(parts: any[]): EmailAttachment[] {
+    const attachments: EmailAttachment[] = [];
+    
+    const processPart = (part: any) => {
+      if (part.filename && part.body && part.body.attachmentId) {
+        // 添付ファイルの場合
+        attachments.push({
+          filename: part.filename,
+          mimeType: part.mimeType || 'application/octet-stream',
+          size: part.body.size || 0,
+          attachmentId: part.body.attachmentId
+        });
+      } else if (part.parts) {
+        // ネストされた部分を再帰的に処理
+        part.parts.forEach(processPart);
+      }
+    };
+
+    parts.forEach(processPart);
+    return attachments;
+  }
+
+  /**
+   * 添付ファイルを取得
+   */
+  async getAttachment(messageId: string, attachmentId: string): Promise<EmailAttachment | null> {
+    if (!this.useRealAPI) {
+      // モックデータの場合はダミーデータを返す
+      console.log(`📎 モックデータから添付ファイル ${attachmentId} を取得`);
+      return {
+        filename: 'mock_file.pdf',
+        mimeType: 'application/pdf',
+        size: 1024000,
+        attachmentId: attachmentId,
+        data: 'JVBERi0xLjQKJcfsj6IKNSAwIG9iago8PAovVHlwZSAvUGFnZQo=' // PDFダミーデータ
+      };
+    }
+
+    try {
+      console.log(`📎 Gmail API: 添付ファイル取得開始 - メッセージID: ${messageId}, 添付ID: ${attachmentId}`);
+      
+      // Gmail APIで添付ファイルを取得
+      const response = await this.gmail.users.messages.attachments.get({
+        userId: 'me',
+        messageId: messageId,
+        id: attachmentId
+      });
+
+      if (!response.data.data) {
+        console.error('添付ファイルデータが見つかりません');
+        return null;
+      }
+
+      // メールからファイル名とmimeTypeを取得
+      const messageResponse = await this.gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full'
+      });
+
+      const attachment = this.findAttachmentInfo(messageResponse.data.payload.parts, attachmentId);
+      
+      if (!attachment) {
+        console.error('添付ファイル情報が見つかりません');
+        return null;
+      }
+
+      console.log(`✅ Gmail API: 添付ファイル取得完了 - ${attachment.filename}`);
+      
+      return {
+        filename: attachment.filename,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        attachmentId: attachmentId,
+        data: response.data.data
+      };
+    } catch (error) {
+      console.error('添付ファイル取得エラー:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 添付ファイル情報を検索
+   */
+  private findAttachmentInfo(parts: any[], attachmentId: string): { filename: string, mimeType: string, size: number } | null {
+    for (const part of parts) {
+      if (part.body && part.body.attachmentId === attachmentId) {
+        return {
+          filename: part.filename || 'unknown',
+          mimeType: part.mimeType || 'application/octet-stream',
+          size: part.body.size || 0
+        };
+      }
+      if (part.parts) {
+        const result = this.findAttachmentInfo(part.parts, attachmentId);
+        if (result) return result;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Gmail検索クエリを構築
+   */
+  private buildGmailQuery(filters: any): string {
+    const queryParts: string[] = [];
+    
+    // 基本検索クエリ
+    if (filters.query) {
+      queryParts.push(filters.query);
+    }
+    
+    // 送信者フィルター
+    if (filters.sender) {
+      queryParts.push(`from:${filters.sender}`);
+    }
+    
+    // 件名フィルター
+    if (filters.subject) {
+      queryParts.push(`subject:${filters.subject}`);
+    }
+    
+    // 添付ファイルフィルター
+    if (filters.hasAttachment) {
+      queryParts.push('has:attachment');
+    }
+    
+    // 日付範囲フィルター
+    if (filters.dateStart) {
+      queryParts.push(`after:${filters.dateStart}`);
+    }
+    if (filters.dateEnd) {
+      queryParts.push(`before:${filters.dateEnd}`);
+    }
+    
+    // 既読状態フィルター
+    if (filters.isRead === true) {
+      queryParts.push('-is:unread');
+    } else if (filters.isRead === false) {
+      queryParts.push('is:unread');
+    }
+    
+    // 重要度フィルター
+    if (filters.isImportant === true) {
+      queryParts.push('is:important');
+    } else if (filters.isImportant === false) {
+      queryParts.push('-is:important');
+    }
+    
+    // デフォルトでinboxを検索
+    if (queryParts.length === 0) {
+      queryParts.push('in:inbox');
+    } else {
+      queryParts.push('in:inbox');
+    }
+    
+    return queryParts.join(' ');
+  }
+
+  /**
+   * モックメールをフィルタリング
+   */
+  private filterMockEmails(emails: ParsedEmail[], filters: any): ParsedEmail[] {
+    return emails.filter(email => {
+      // 基本検索クエリ
+      if (filters.query) {
+        const query = filters.query.toLowerCase();
+        const searchText = `${email.subject} ${email.body} ${email.from} ${email.to}`.toLowerCase();
+        if (!searchText.includes(query)) return false;
+      }
+      
+      // 送信者フィルター
+      if (filters.sender && !email.from.toLowerCase().includes(filters.sender.toLowerCase())) {
+        return false;
+      }
+      
+      // 件名フィルター
+      if (filters.subject && !email.subject.toLowerCase().includes(filters.subject.toLowerCase())) {
+        return false;
+      }
+      
+      // 添付ファイルフィルター
+      if (filters.hasAttachment && (!email.attachments || email.attachments.length === 0)) {
+        return false;
+      }
+      
+      // 日付範囲フィルター
+      if (filters.dateStart) {
+        try {
+          const emailDate = new Date(email.date);
+          if (!isNaN(emailDate.getTime())) {
+            const emailDateStr = emailDate.toISOString().split('T')[0];
+            if (emailDateStr && emailDateStr < filters.dateStart) return false;
+          }
+        } catch (e) {
+          // 日付解析エラーは無視
+        }
+      }
+      if (filters.dateEnd) {
+        try {
+          const emailDate = new Date(email.date);
+          if (!isNaN(emailDate.getTime())) {
+            const emailDateStr = emailDate.toISOString().split('T')[0];
+            if (emailDateStr && emailDateStr > filters.dateEnd) return false;
+          }
+        } catch (e) {
+          // 日付解析エラーは無視
+        }
+      }
+      
+      // 既読状態フィルター
+      if (filters.isRead !== undefined && email.read !== filters.isRead) {
+        return false;
+      }
+      
+      // 重要度フィルター
+      if (filters.isImportant !== undefined && email.important !== filters.isImportant) {
+        return false;
+      }
+      
+      return true;
+    });
+  }
+
+  /**
+   * メールをフィルタリング（Gmail API結果用）
+   */
+  private filterEmails(emails: ParsedEmail[], filters: any): ParsedEmail[] {
+    // Gmail APIでは多くのフィルタリングが既に適用されているので、
+    // 追加のクライアントサイドフィルタリングを実行
+    return this.filterMockEmails(emails, filters);
   }
 
   /**
@@ -480,6 +873,8 @@ export class GmailService {
   private createEmailString(emailData: EmailSendRequest): string {
     const email = [
       `To: ${emailData.to}`,
+      emailData.cc ? `Cc: ${emailData.cc}` : '',
+      emailData.bcc ? `Bcc: ${emailData.bcc}` : '',
       `Subject: ${emailData.subject}`,
       emailData.inReplyTo ? `In-Reply-To: ${emailData.inReplyTo}` : '',
       'Content-Type: text/plain; charset=utf-8',

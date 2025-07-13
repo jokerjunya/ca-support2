@@ -6,7 +6,7 @@ const router = Router();
 
 // Google OAuth2.0認証開始
 router.get('/google', passport.authenticate('google', { 
-  scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.readonly'] 
+  scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send'] 
 }));
 
 // Google OAuth2.0認証コールバック

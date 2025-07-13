@@ -24,27 +24,41 @@ const requireAuth = (req: any, res: any, next: any) => {
   next();
 };
 
-// メール一覧取得
+// メール一覧取得（高度な検索対応）
 router.get('/', requireAuth, async (req, res) => {
   try {
     const user = req.user as AuthUser;
     const gmailService = createGmailService(user);
     
     const maxResults = parseInt(req.query.maxResults as string) || 10;
-    const query = req.query.query as string;
     
-    const emails = await gmailService.getEmails(maxResults, query);
+    // 高度な検索フィルター
+    const searchFilters = {
+      query: req.query.query as string,
+      sender: req.query.sender as string,
+      subject: req.query.subject as string,
+      hasAttachment: req.query.hasAttachment === 'true',
+      dateStart: req.query.dateStart as string,
+      dateEnd: req.query.dateEnd as string,
+      isRead: req.query.isRead ? req.query.isRead === 'true' : undefined,
+      isImportant: req.query.isImportant ? req.query.isImportant === 'true' : undefined,
+    };
+
+    console.log('🔍 高度な検索リクエスト:', searchFilters);
+    
+    const emails = await gmailService.searchEmails(maxResults, searchFilters);
     
     return res.json({
       success: true,
       data: emails,
-      count: emails.length
+      count: emails.length,
+      filters: searchFilters
     });
   } catch (error) {
-    console.error('メール取得エラー:', error);
+    console.error('メール検索エラー:', error);
     return res.status(500).json({
       success: false,
-      error: 'メール取得に失敗しました'
+      error: 'メール検索に失敗しました'
     });
   }
 });
@@ -117,6 +131,64 @@ router.patch('/:id/read', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('既読処理エラー:', error);
     return res.status(500).json({ error: '既読処理に失敗しました' });
+  }
+});
+
+// 🗑️ メール削除（ゴミ箱へ移動）
+router.delete('/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    
+    const success = await gmailService.deleteEmail(id);
+    
+    if (!success) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'メールが見つかりません' 
+      });
+    }
+
+    return res.json({ 
+      success: true, 
+      message: 'メールをゴミ箱に移動しました' 
+    });
+  } catch (error) {
+    console.error('メール削除エラー:', error);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'メール削除に失敗しました' 
+    });
+  }
+});
+
+// 📦 メールアーカイブ
+router.patch('/:id/archive', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    
+    const success = await gmailService.archiveEmail(id);
+    
+    if (!success) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'メールが見つかりません' 
+      });
+    }
+
+    return res.json({ 
+      success: true, 
+      message: 'メールをアーカイブしました' 
+    });
+  } catch (error) {
+    console.error('メールアーカイブエラー:', error);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'メールアーカイブに失敗しました' 
+    });
   }
 });
 
@@ -253,6 +325,46 @@ router.get('/threads/:threadId', requireAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       error: 'スレッド取得に失敗しました'
+    });
+  }
+});
+
+// 📎 新機能: 添付ファイルダウンロード
+router.get('/:messageId/attachments/:attachmentId', requireAuth, async (req, res) => {
+  try {
+    const { messageId, attachmentId } = req.params;
+    const user = req.user as AuthUser;
+    const gmailService = createGmailService(user);
+    
+    const attachmentData = await gmailService.getAttachment(messageId, attachmentId);
+    
+    if (!attachmentData) {
+      return res.status(404).json({ 
+        success: false, 
+        error: '添付ファイルが見つかりません' 
+      });
+    }
+
+    // Base64デコードしてファイルデータを返す
+    if (!attachmentData.data) {
+      return res.status(500).json({ 
+        success: false, 
+        error: '添付ファイルデータが空です' 
+      });
+    }
+    
+    const fileBuffer = Buffer.from(attachmentData.data, 'base64');
+    
+    res.setHeader('Content-Type', attachmentData.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${attachmentData.filename}"`);
+    res.setHeader('Content-Length', fileBuffer.length);
+    
+    return res.send(fileBuffer);
+  } catch (error) {
+    console.error('添付ファイル取得エラー:', error);
+    return res.status(500).json({
+      success: false,
+      error: '添付ファイル取得に失敗しました'
     });
   }
 });

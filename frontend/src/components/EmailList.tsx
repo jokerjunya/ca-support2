@@ -1,18 +1,22 @@
 'use client';
 
-import { Clock, Mail, MailOpen } from 'lucide-react';
+import { Clock, Mail, MailOpen, Paperclip, Archive, Trash2 } from 'lucide-react';
 import { Email } from '../types/email';
 
 interface EmailListProps {
   emails: Email[];
   selectedEmail: Email | null;
   onEmailSelect: (email: Email) => void;
+  onDelete?: (email: Email) => void;
+  onArchive?: (email: Email) => void;
 }
 
 export default function EmailList({ 
   emails, 
   selectedEmail, 
-  onEmailSelect
+  onEmailSelect,
+  onDelete,
+  onArchive
 }: EmailListProps) {
   
   const formatDate = (date: Date | string) => {
@@ -42,6 +46,64 @@ export default function EmailList({
     onEmailSelect(email);
   };
 
+  const handleDelete = async (email: Email, event: React.MouseEvent) => {
+    event.stopPropagation(); // メール選択を防ぐ
+    
+    if (onDelete) {
+      onDelete(email);
+      return;
+    }
+    
+    if (confirm(`「${email.subject}」をゴミ箱に移動しますか？`)) {
+      try {
+        const response = await fetch(`/api/emails/${email.id}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          console.log('メール削除成功');
+          window.location.reload();
+        } else {
+          const errorData = await response.json();
+          alert(`メール削除に失敗しました: ${errorData.error}`);
+        }
+      } catch (error) {
+        console.error('メール削除エラー:', error);
+        alert('メール削除に失敗しました。');
+      }
+    }
+  };
+
+  const handleArchive = async (email: Email, event: React.MouseEvent) => {
+    event.stopPropagation(); // メール選択を防ぐ
+    
+    if (onArchive) {
+      onArchive(email);
+      return;
+    }
+    
+    if (confirm(`「${email.subject}」をアーカイブしますか？`)) {
+      try {
+        const response = await fetch(`/api/emails/${email.id}/archive`, {
+          method: 'PATCH',
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          console.log('メールアーカイブ成功');
+          window.location.reload();
+        } else {
+          const errorData = await response.json();
+          alert(`メールアーカイブに失敗しました: ${errorData.error}`);
+        }
+      } catch (error) {
+        console.error('メールアーカイブエラー:', error);
+        alert('メールアーカイブに失敗しました。');
+      }
+    }
+  };
+
   if (emails.length === 0) {
     return (
       <div className="p-4 text-center">
@@ -57,7 +119,7 @@ export default function EmailList({
         <div
           key={email.id}
           onClick={() => handleEmailClick(email)}
-          className={`p-4 cursor-pointer hover:bg-spotify-gray transition-colors ${
+          className={`group p-4 cursor-pointer hover:bg-spotify-gray transition-colors ${
             selectedEmail?.id === email.id ? 'bg-spotify-gray' : ''
           }`}
         >
@@ -103,14 +165,40 @@ export default function EmailList({
                 {email.snippet}
               </p>
               
-              {/* Labels */}
-              {email.important && (
-                <div className="mt-2">
-                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-important-red/20 text-important-red">
-                    重要
-                  </span>
+              {/* Labels and Actions */}
+              <div className="mt-2 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  {email.important && (
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-important-red/20 text-important-red">
+                      重要
+                    </span>
+                  )}
+                  {email.attachments && email.attachments.length > 0 && (
+                    <span className="inline-flex items-center space-x-1 px-2 py-1 rounded-full text-xs bg-spotify-green/20 text-spotify-green">
+                      <Paperclip className="w-3 h-3" />
+                      <span>{email.attachments.length}</span>
+                    </span>
+                  )}
                 </div>
-              )}
+                
+                {/* Quick Actions (hover時に表示) */}
+                <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => handleArchive(email, e)}
+                    className="p-1 hover:bg-spotify-green/20 rounded transition-colors"
+                    title="アーカイブ"
+                  >
+                    <Archive className="w-3 h-3 text-spotify-light-gray hover:text-spotify-green" />
+                  </button>
+                  <button
+                    onClick={(e) => handleDelete(email, e)}
+                    className="p-1 hover:bg-red-500/20 rounded transition-colors"
+                    title="削除"
+                  >
+                    <Trash2 className="w-3 h-3 text-spotify-light-gray hover:text-red-500" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -10,6 +10,15 @@ export interface Email {
   important: boolean;
   labels: string[];
   snippet: string;
+  attachments: EmailAttachment[];
+}
+
+export interface EmailAttachment {
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId: string;
+  data?: string; // base64 encoded data
 }
 
 export interface EmailSendRequest {

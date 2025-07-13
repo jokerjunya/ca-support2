@@ -1,26 +1,17 @@
 'use client';
 
-import { Reply, Forward, Archive, Trash2, Star, MoreVertical } from 'lucide-react';
-
-interface Email {
-  id: string;
-  threadId: string;
-  subject: string;
-  from: string;
-  to: string;
-  date: Date;
-  body: string;
-  isRead: boolean;
-  labels: string[];
-  snippet: string;
-}
+import { Reply, Forward, Archive, Trash2, Star, MoreVertical, Paperclip } from 'lucide-react';
+import AttachmentList from './AttachmentList';
+import { Email } from '../types/email';
 
 interface EmailDetailProps {
   email: Email;
   onReply: () => void;
+  onDelete?: () => void;
+  onArchive?: () => void;
 }
 
-export default function EmailDetail({ email, onReply }: EmailDetailProps) {
+export default function EmailDetail({ email, onReply, onDelete, onArchive }: EmailDetailProps) {
   
   const formatFullDate = (date: Date | string) => {
     const emailDate = new Date(date);
@@ -44,6 +35,62 @@ export default function EmailDetail({ email, onReply }: EmailDetailProps) {
       return emailString.split('<')[0].trim().replace(/"/g, '');
     }
     return emailString.split('@')[0];
+  };
+
+  const handleDelete = async () => {
+    if (onDelete) {
+      onDelete();
+      return;
+    }
+    
+    if (confirm('このメールをゴミ箱に移動しますか？')) {
+      try {
+        const response = await fetch(`/api/emails/${email.id}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          console.log('メール削除成功');
+          // 削除後にページを更新またはリダイレクト
+          window.location.reload();
+        } else {
+          const errorData = await response.json();
+          alert(`メール削除に失敗しました: ${errorData.error}`);
+        }
+      } catch (error) {
+        console.error('メール削除エラー:', error);
+        alert('メール削除に失敗しました。');
+      }
+    }
+  };
+
+  const handleArchive = async () => {
+    if (onArchive) {
+      onArchive();
+      return;
+    }
+    
+    if (confirm('このメールをアーカイブしますか？')) {
+      try {
+        const response = await fetch(`/api/emails/${email.id}/archive`, {
+          method: 'PATCH',
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          console.log('メールアーカイブ成功');
+          // アーカイブ後にページを更新またはリダイレクト
+          window.location.reload();
+        } else {
+          const errorData = await response.json();
+          alert(`メールアーカイブに失敗しました: ${errorData.error}`);
+        }
+      } catch (error) {
+        console.error('メールアーカイブエラー:', error);
+        alert('メールアーカイブに失敗しました。');
+      }
+    }
   };
 
   return (
@@ -80,7 +127,7 @@ export default function EmailDetail({ email, onReply }: EmailDetailProps) {
                   重要
                 </span>
               )}
-              {!email.isRead && (
+              {!email.read && (
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-unread-blue/20 text-unread-blue">
                   未読
                 </span>
@@ -106,12 +153,20 @@ export default function EmailDetail({ email, onReply }: EmailDetailProps) {
               <Star className="w-5 h-5 text-spotify-light-gray" />
             </button>
             
-            <button className="p-2 hover:bg-spotify-gray rounded-lg transition-colors">
-              <Archive className="w-5 h-5 text-spotify-light-gray" />
+            <button 
+              onClick={handleArchive}
+              className="p-2 hover:bg-spotify-gray rounded-lg transition-colors"
+              title="アーカイブ"
+            >
+              <Archive className="w-5 h-5 text-spotify-light-gray hover:text-spotify-green" />
             </button>
             
-            <button className="p-2 hover:bg-spotify-gray rounded-lg transition-colors">
-              <Trash2 className="w-5 h-5 text-spotify-light-gray" />
+            <button 
+              onClick={handleDelete}
+              className="p-2 hover:bg-spotify-gray rounded-lg transition-colors"
+              title="ゴミ箱に移動"
+            >
+              <Trash2 className="w-5 h-5 text-spotify-light-gray hover:text-red-500" />
             </button>
             
             <button className="p-2 hover:bg-spotify-gray rounded-lg transition-colors">
@@ -123,12 +178,17 @@ export default function EmailDetail({ email, onReply }: EmailDetailProps) {
 
       {/* Email Body */}
       <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-4xl">
+        <div className="max-w-4xl space-y-4">
           <div className="bg-spotify-dark-gray rounded-lg p-6 border border-spotify-gray">
             <pre className="whitespace-pre-wrap font-sans text-spotify-white leading-relaxed">
               {email.body}
             </pre>
           </div>
+          
+          {/* Attachments */}
+          {email.attachments && email.attachments.length > 0 && (
+            <AttachmentList attachments={email.attachments} emailId={email.id} />
+          )}
         </div>
       </div>
     </div>
