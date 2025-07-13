@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  # Ollama AI サービス
+  ollama:
+    image: ollama/ollama:latest
+    container_name: gmail-assistant-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    networks:
+      - gmail-assistant-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # バックエンドサービス
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gmail-assistant-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - CLIENT_URL=http://localhost:3000
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=qwen3:30b
+      - GMAIL_API_ENABLED=true
+    volumes:
+      - ./backend:/app
+      - backend_node_modules:/app/node_modules
+    networks:
+      - gmail-assistant-network
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # フロントエンドサービス
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: gmail-assistant-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    networks:
+      - gmail-assistant-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # モデル初期化サービス（一回限り）
+  model-setup:
+    image: ollama/ollama:latest
+    container_name: gmail-assistant-model-setup
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - gmail-assistant-network
+    depends_on:
+      ollama:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Qwen3:30Bモデルをダウンロード中...'
+        ollama pull qwen3:30b || echo 'モデルのダウンロードに失敗しました。手動でダウンロードしてください。'
+        echo 'モデルセットアップ完了'
+      "
+    profiles:
+      - setup
+
+volumes:
+  ollama_data:
+    driver: local
+  backend_node_modules:
+    driver: local
+  frontend_node_modules:
+    driver: local
+
+networks:
+  gmail-assistant-network:
+    driver: bridge 
